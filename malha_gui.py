@@ -114,6 +114,10 @@ class MeshRepairApp(QMainWindow):
         self.action_remove_nonmanifold.triggered.connect(self.remover_nao_manifold)
         self.menu_topologia.addAction(self.action_remove_nonmanifold)
         self.action_remove_nonmanifold.setEnabled(False)
+        self.action_decimate = QAction('Simplificar Malha (Decimate)', self)
+        self.action_decimate.triggered.connect(self.simplificar_malha_dialog)
+        self.menu_topologia.addAction(self.action_decimate)
+        self.action_decimate.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -131,6 +135,7 @@ class MeshRepairApp(QMainWindow):
         self.action_normals_in.setEnabled(False)
         self.action_fill_holes.setEnabled(False)
         self.action_remove_nonmanifold.setEnabled(False)
+        self.action_decimate.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -166,6 +171,7 @@ class MeshRepairApp(QMainWindow):
             self.action_normals_in.setEnabled(False)
             self.action_fill_holes.setEnabled(False)
             self.action_remove_nonmanifold.setEnabled(False)
+            self.action_decimate.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -234,6 +240,7 @@ class MeshRepairApp(QMainWindow):
         self.action_normals_in.setEnabled(True)
         self.action_fill_holes.setEnabled(True)
         self.action_remove_nonmanifold.setEnabled(True)
+        self.action_decimate.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -370,6 +377,39 @@ class MeshRepairApp(QMainWindow):
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Erro ao Remover Não-Manifold', f'Não foi possível remover geometria não-manifold.\n{e}')
+
+    def simplificar_malha_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        fator, ok = QInputDialog.getDouble(self, 'Simplificar Malha', 'Fator de redução (0.0 a 1.0):', 0.5, 0.01, 1.0, 2)
+        if ok:
+            self.simplificar_malha(fator)
+
+    def simplificar_malha(self, fator):
+        if self.mesh_reparada is None:
+            return
+        import pymeshlab
+        import numpy as np
+        try:
+            m = self.mesh_reparada
+            ms = pymeshlab.MeshSet()
+            ms.add_mesh(pymeshlab.Mesh(m.vertices, m.faces))
+            ms.meshing_decimation_quadric_edge_collapse(targetfacenum=int(len(m.faces)*fator), preservenormal=True)
+            new_mesh = ms.current_mesh()
+            vertices = np.array(new_mesh.vertex_matrix())
+            faces = np.array(new_mesh.face_matrix())
+            simplified = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+            simplified = centralizar_na_origem(simplified)
+            self.mesh_reparada = simplified
+            self.gl_reparada.clear()
+            item = create_glmeshitem(simplified, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(simplified, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, simplified)
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, 'Erro ao Simplificar', f'Não foi possível simplificar a malha.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
