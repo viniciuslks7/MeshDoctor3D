@@ -23,6 +23,16 @@ def create_glmeshitem(mesh, color=(0.5, 0.5, 1, 1)):
     return item
 
 
+def centralizar_na_origem(mesh):
+    # Move o centro do bounding box para a origem
+    if mesh is None or not hasattr(mesh, 'bounding_box'):
+        return mesh
+    bbox = mesh.bounding_box
+    center = bbox.centroid
+    mesh.vertices -= center
+    return mesh
+
+
 class MeshRepairApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -118,13 +128,24 @@ class MeshRepairApp(QMainWindow):
         self.action_fill_holes.setEnabled(False)
 
     def abrir_arquivo(self):
+        from PyQt5.QtWidgets import QMessageBox
         fname, _ = QFileDialog.getOpenFileName(self, 'Abrir arquivo STL/OBJ', '', 'Malhas 3D (*.stl *.obj)')
         if fname:
-            self.mesh_original = trimesh.load(fname)
+            mesh = trimesh.load(fname, process=False)
+            # Tentar processar e corrigir problemas leves
+            try:
+                mesh.process(validate=True)
+            except Exception as e:
+                QMessageBox.warning(self, 'Aviso', f'Problemas ao processar a malha original.\n{e}')
+            mesh = centralizar_na_origem(mesh)
+            self.mesh_original = mesh
             self.gl_original.clear()
             self.gl_reparada.clear()
-            item = create_glmeshitem(self.mesh_original, color=(0.1, 0.3, 1, 1))  # azul mais forte
-            self.gl_original.addItem(item)
+            try:
+                item = create_glmeshitem(self.mesh_original, color=(0.1, 0.3, 1, 1))  # azul mais forte
+                self.gl_original.addItem(item)
+            except Exception as e:
+                QMessageBox.warning(self, 'Erro ao Renderizar', f'Não foi possível renderizar a malha original.\nA malha pode estar corrompida ou precisar de reparo.\n{e}')
             self.highlight_holes(self.mesh_original)
             self.highlight_nonmanifold_faces(self.mesh_original)
             self.analisar_malha(self.mesh_original, self.label_analise)
@@ -136,6 +157,9 @@ class MeshRepairApp(QMainWindow):
             self.action_suavizar.setEnabled(False)
             self.action_reset_original.setEnabled(True)
             self.action_reset_reparada.setEnabled(False)
+            self.action_normals_out.setEnabled(False)
+            self.action_normals_in.setEnabled(False)
+            self.action_fill_holes.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -190,6 +214,7 @@ class MeshRepairApp(QMainWindow):
             meshfix = pymeshfix.MeshFix(mesh.vertices, mesh.faces)
             meshfix.repair(verbose=True)
             mesh_reparada = trimesh.Trimesh(vertices=meshfix.v, faces=meshfix.f)
+        mesh_reparada = centralizar_na_origem(mesh_reparada)
         self.mesh_reparada = mesh_reparada
         self.gl_reparada.clear()
         item = create_glmeshitem(mesh_reparada, color=(0.1, 0.8, 0.1, 1))  # verde mais forte
