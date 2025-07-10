@@ -118,6 +118,14 @@ class MeshRepairApp(QMainWindow):
         self.action_decimate.triggered.connect(self.simplificar_malha_dialog)
         self.menu_topologia.addAction(self.action_decimate)
         self.action_decimate.setEnabled(False)
+        self.action_triangulate = QAction('Triangular Faces (Triangulate)', self)
+        self.action_triangulate.triggered.connect(self.triangulate_faces)
+        self.menu_topologia.addAction(self.action_triangulate)
+        self.action_triangulate.setEnabled(False)
+        self.action_quadrangulate = QAction('Quadrangular Faces (Quadrangulate)', self)
+        self.action_quadrangulate.triggered.connect(self.quadrangulate_faces)
+        self.menu_topologia.addAction(self.action_quadrangulate)
+        self.action_quadrangulate.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -136,6 +144,8 @@ class MeshRepairApp(QMainWindow):
         self.action_fill_holes.setEnabled(False)
         self.action_remove_nonmanifold.setEnabled(False)
         self.action_decimate.setEnabled(False)
+        self.action_triangulate.setEnabled(False)
+        self.action_quadrangulate.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -172,6 +182,8 @@ class MeshRepairApp(QMainWindow):
             self.action_fill_holes.setEnabled(False)
             self.action_remove_nonmanifold.setEnabled(False)
             self.action_decimate.setEnabled(False)
+            self.action_triangulate.setEnabled(False)
+            self.action_quadrangulate.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -241,6 +253,8 @@ class MeshRepairApp(QMainWindow):
         self.action_fill_holes.setEnabled(True)
         self.action_remove_nonmanifold.setEnabled(True)
         self.action_decimate.setEnabled(True)
+        self.action_triangulate.setEnabled(True)
+        self.action_quadrangulate.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -410,6 +424,93 @@ class MeshRepairApp(QMainWindow):
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Erro ao Simplificar', f'Não foi possível simplificar a malha.\n{e}')
+
+    def triangulate_faces(self):
+        if self.mesh_reparada is None:
+            return
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        faces = self.mesh_reparada.faces
+        # Detectar se já está toda em triângulos
+        if np.all([len(set(face)) == 3 for face in faces]):
+            QMessageBox.information(self, 'Triangular Faces', 'A malha já está toda em triângulos!')
+            return
+        try:
+            verts = self.mesh_reparada.vertices
+            new_faces = []
+            for face in faces:
+                unique = list(dict.fromkeys(face))
+                if len(unique) < 3:
+                    continue
+                if len(unique) == 3:
+                    new_faces.append(unique)
+                else:
+                    # Fan triangulation
+                    for i in range(1, len(unique) - 1):
+                        new_faces.append([unique[0], unique[i], unique[i+1]])
+            tri = trimesh.Trimesh(vertices=verts, faces=np.array(new_faces), process=True)
+            tri = centralizar_na_origem(tri)
+            self.mesh_reparada = tri
+            self.gl_reparada.clear()
+            item = create_glmeshitem(tri, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(tri, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, tri)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro ao Triangular', f'Não foi possível triangular as faces.\n{e}')
+
+    def quadrangulate_faces(self):
+        if self.mesh_reparada is None:
+            return
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        faces = self.mesh_reparada.faces
+        verts = self.mesh_reparada.vertices
+        quads = []
+        # Agrupar pares de triângulos adjacentes em quadriláteros
+        # (Simples: só para faces já trianguladas)
+        if np.all([len(set(face)) == 3 for face in faces]):
+            from collections import defaultdict
+            edge_map = defaultdict(list)
+            for idx, face in enumerate(faces):
+                for i in range(3):
+                    a, b = sorted((face[i], face[(i+1)%3]))
+                    edge_map[(a, b)].append(idx)
+            paired = set()
+            for idx, face in enumerate(faces):
+                if idx in paired:
+                    continue
+                found = False
+                for i in range(3):
+                    a, b = sorted((face[i], face[(i+1)%3]))
+                    adj = [f for f in edge_map[(a, b)] if f != idx and f not in paired]
+                    if adj:
+                        j = adj[0]
+                        f2 = faces[j]
+                        quad = list(set(face) | set(f2))
+                        if len(quad) == 4:
+                            quads.append(quad)
+                            paired.add(idx)
+                            paired.add(j)
+                            found = True
+                            break
+            # Só criar malha se todas as faces foram agrupadas em quadriláteros
+            if len(quads)*2 == len(faces):
+                try:
+                    quad = trimesh.Trimesh(vertices=verts, faces=np.array(quads), process=True)
+                    quad = centralizar_na_origem(quad)
+                    self.mesh_reparada = quad
+                    self.gl_reparada.clear()
+                    item = create_glmeshitem(quad, color=(0.1, 0.8, 0.1, 1))
+                    self.gl_reparada.addItem(item)
+                    self.analisar_malha(quad, self.label_analise_reparada)
+                    self.centralizar_camera(self.gl_reparada, quad)
+                except Exception as e:
+                    QMessageBox.warning(self, 'Erro ao Quadrangular', f'Não foi possível quadrangular as faces.\n{e}')
+            else:
+                QMessageBox.warning(self, 'Quadrangular Faces', 'Não foi possível quadrangular toda a malha. Só é possível quadrangular se todos os triângulos puderem ser agrupados em pares.')
+        else:
+            QMessageBox.warning(self, 'Quadrangular Faces', 'A quadrangulação automática só é suportada para malhas totalmente trianguladas.')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
