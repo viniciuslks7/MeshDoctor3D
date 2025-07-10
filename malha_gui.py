@@ -126,6 +126,10 @@ class MeshRepairApp(QMainWindow):
         self.action_quadrangulate.triggered.connect(self.quadrangulate_faces)
         self.menu_topologia.addAction(self.action_quadrangulate)
         self.action_quadrangulate.setEnabled(False)
+        self.action_remove_degenerate = QAction('Remover Faces Degeneradas/Área Zero', self)
+        self.action_remove_degenerate.triggered.connect(self.remover_faces_degeneradas)
+        self.menu_topologia.addAction(self.action_remove_degenerate)
+        self.action_remove_degenerate.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -146,6 +150,7 @@ class MeshRepairApp(QMainWindow):
         self.action_decimate.setEnabled(False)
         self.action_triangulate.setEnabled(False)
         self.action_quadrangulate.setEnabled(False)
+        self.action_remove_degenerate.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -184,6 +189,7 @@ class MeshRepairApp(QMainWindow):
             self.action_decimate.setEnabled(False)
             self.action_triangulate.setEnabled(False)
             self.action_quadrangulate.setEnabled(False)
+            self.action_remove_degenerate.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -255,6 +261,7 @@ class MeshRepairApp(QMainWindow):
         self.action_decimate.setEnabled(True)
         self.action_triangulate.setEnabled(True)
         self.action_quadrangulate.setEnabled(True)
+        self.action_remove_degenerate.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -511,6 +518,28 @@ class MeshRepairApp(QMainWindow):
                 QMessageBox.warning(self, 'Quadrangular Faces', 'Não foi possível quadrangular toda a malha. Só é possível quadrangular se todos os triângulos puderem ser agrupados em pares.')
         else:
             QMessageBox.warning(self, 'Quadrangular Faces', 'A quadrangulação automática só é suportada para malhas totalmente trianguladas.')
+
+    def remover_faces_degeneradas(self):
+        if self.mesh_reparada is None:
+            return
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        mesh = self.mesh_reparada.copy()
+        # Faces degeneradas: área zero ou vértices repetidos/colineares
+        areas = mesh.area_faces
+        mask = areas > 1e-12
+        faces_validas = mesh.faces[mask]
+        try:
+            cleaned = trimesh.Trimesh(vertices=mesh.vertices, faces=faces_validas, process=True)
+            cleaned = centralizar_na_origem(cleaned)
+            self.mesh_reparada = cleaned
+            self.gl_reparada.clear()
+            item = create_glmeshitem(cleaned, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(cleaned, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, cleaned)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro ao Remover Faces Degeneradas', f'Não foi possível remover faces degeneradas.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
