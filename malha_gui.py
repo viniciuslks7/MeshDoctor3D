@@ -110,6 +110,10 @@ class MeshRepairApp(QMainWindow):
         self.action_fill_holes.triggered.connect(self.preencher_buracos)
         self.menu_topologia.addAction(self.action_fill_holes)
         self.action_fill_holes.setEnabled(False)
+        self.action_remove_nonmanifold = QAction('Remover Geometria Não-Manifold', self)
+        self.action_remove_nonmanifold.triggered.connect(self.remover_nao_manifold)
+        self.menu_topologia.addAction(self.action_remove_nonmanifold)
+        self.action_remove_nonmanifold.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -126,6 +130,7 @@ class MeshRepairApp(QMainWindow):
         self.action_normals_out.setEnabled(False)
         self.action_normals_in.setEnabled(False)
         self.action_fill_holes.setEnabled(False)
+        self.action_remove_nonmanifold.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -160,6 +165,7 @@ class MeshRepairApp(QMainWindow):
             self.action_normals_out.setEnabled(False)
             self.action_normals_in.setEnabled(False)
             self.action_fill_holes.setEnabled(False)
+            self.action_remove_nonmanifold.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -227,6 +233,7 @@ class MeshRepairApp(QMainWindow):
         self.action_normals_out.setEnabled(True)
         self.action_normals_in.setEnabled(True)
         self.action_fill_holes.setEnabled(True)
+        self.action_remove_nonmanifold.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -340,6 +347,29 @@ class MeshRepairApp(QMainWindow):
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Erro ao Preencher Buracos', f'Não foi possível preencher buracos/tornar manifold.\n{e}')
+
+    def remover_nao_manifold(self):
+        if self.mesh_reparada is None:
+            return
+        mesh = self.mesh_reparada.copy()
+        try:
+            # Remove faces não-manifold
+            if hasattr(mesh, 'faces_nonmanifold') and len(mesh.faces_nonmanifold) > 0:
+                mask = np.ones(len(mesh.faces), dtype=bool)
+                mask[mesh.faces_nonmanifold] = False
+                new_faces = mesh.faces[mask]
+                cleaned = trimesh.Trimesh(vertices=mesh.vertices, faces=new_faces, process=True)
+            else:
+                cleaned = mesh
+            self.mesh_reparada = cleaned
+            self.gl_reparada.clear()
+            item = create_glmeshitem(cleaned, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(cleaned, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, cleaned)
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, 'Erro ao Remover Não-Manifold', f'Não foi possível remover geometria não-manifold.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
