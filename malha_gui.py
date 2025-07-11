@@ -166,6 +166,10 @@ class MeshRepairApp(QMainWindow):
         self.action_shade_flat.triggered.connect(self.shade_flat)
         self.menu_sombreamento.addAction(self.action_shade_flat)
         self.action_shade_flat.setEnabled(False)
+        self.action_auto_smooth = QAction('Auto Smooth', self)
+        self.action_auto_smooth.triggered.connect(self.auto_smooth_dialog)
+        self.menu_sombreamento.addAction(self.action_auto_smooth)
+        self.action_auto_smooth.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -193,6 +197,7 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_retopo.setEnabled(False)
         self.action_shade_smooth.setEnabled(False)
         self.action_shade_flat.setEnabled(False)
+        self.action_auto_smooth.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -237,6 +242,7 @@ class MeshRepairApp(QMainWindow):
             self.action_auto_retopo.setEnabled(False)
             self.action_shade_smooth.setEnabled(False)
             self.action_shade_flat.setEnabled(False)
+            self.action_auto_smooth.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -314,6 +320,7 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_retopo.setEnabled(True)
         self.action_shade_smooth.setEnabled(True)
         self.action_shade_flat.setEnabled(True)
+        self.action_auto_smooth.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -770,6 +777,69 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, mesh)
         except Exception as e:
             QMessageBox.warning(self, 'Erro no Shade Flat', f'Não foi possível aplicar Shade Flat.\n{e}')
+
+    def auto_smooth_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        angulo, ok = QInputDialog.getDouble(self, 'Auto Smooth', 'Ângulo limite (graus):', 30.0, 1.0, 180.0, 1)
+        if ok:
+            self.auto_smooth(angulo)
+
+    def auto_smooth(self, angle_limit):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            faces = mesh.faces
+            verts = mesh.vertices
+            face_normals = mesh.face_normals
+            # Usa face_adjacency e face_adjacency_edges
+            sharp_edges = set()
+            rad_limit = np.deg2rad(angle_limit)
+            for (f1, f2), edge in zip(mesh.face_adjacency, mesh.face_adjacency_edges):
+                n1 = face_normals[f1]
+                n2 = face_normals[f2]
+                angle = np.arccos(np.clip(np.dot(n1, n2), -1.0, 1.0))
+                if angle > rad_limit:
+                    sharp_edges.add(tuple(sorted(edge)))
+            # Para cada vértice, se está em uma aresta "viva", usa normal da face, senão normal suavizada
+            vertex_normals = np.zeros_like(verts)
+            counts = np.zeros(len(verts))
+            for i, face in enumerate(faces):
+                is_sharp = False
+                for j in range(len(face)):
+                    a = face[j]
+                    b = face[(j+1)%len(face)]
+                    if tuple(sorted((a,b))) in sharp_edges:
+                        is_sharp = True
+                        break
+                if is_sharp:
+                    for idx in face:
+                        vertex_normals[idx] += face_normals[i]
+                        counts[idx] += 1
+                else:
+                    for idx in face:
+                        vertex_normals[idx] += face_normals[i]
+                        counts[idx] += 1
+            # Normaliza
+            mask = counts > 0
+            vertex_normals[mask] /= counts[mask][:,None]
+            norms = np.linalg.norm(vertex_normals, axis=1)
+            mask = norms > 0
+            vertex_normals[mask] /= norms[mask][:,None]
+            mesh.vertex_normals = vertex_normals
+            self.mesh_reparada = mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro no Auto Smooth', f'Não foi possível aplicar Auto Smooth.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
