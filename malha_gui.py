@@ -170,6 +170,10 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_smooth.triggered.connect(self.auto_smooth_dialog)
         self.menu_sombreamento.addAction(self.action_auto_smooth)
         self.action_auto_smooth.setEnabled(False)
+        self.action_transfer_normals = QAction('Transferir Normais da Original', self)
+        self.action_transfer_normals.triggered.connect(self.transferir_normais)
+        self.menu_sombreamento.addAction(self.action_transfer_normals)
+        self.action_transfer_normals.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -198,6 +202,7 @@ class MeshRepairApp(QMainWindow):
         self.action_shade_smooth.setEnabled(False)
         self.action_shade_flat.setEnabled(False)
         self.action_auto_smooth.setEnabled(False)
+        self.action_transfer_normals.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -243,6 +248,7 @@ class MeshRepairApp(QMainWindow):
             self.action_shade_smooth.setEnabled(False)
             self.action_shade_flat.setEnabled(False)
             self.action_auto_smooth.setEnabled(False)
+            self.action_transfer_normals.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -321,6 +327,7 @@ class MeshRepairApp(QMainWindow):
         self.action_shade_smooth.setEnabled(True)
         self.action_shade_flat.setEnabled(True)
         self.action_auto_smooth.setEnabled(True)
+        self.action_transfer_normals.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -840,6 +847,32 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, mesh)
         except Exception as e:
             QMessageBox.warning(self, 'Erro no Auto Smooth', f'Não foi possível aplicar Auto Smooth.\n{e}')
+
+    def transferir_normais(self):
+        if self.mesh_original is None or self.mesh_reparada is None:
+            return
+        import trimesh
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            orig = self.mesh_original
+            rep = self.mesh_reparada
+            if len(orig.vertices) == len(rep.vertices):
+                rep.vertex_normals = orig.vertex_normals.copy()
+            else:
+                # Transferência por proximidade (k-d tree)
+                from scipy.spatial import cKDTree
+                tree = cKDTree(orig.vertices)
+                dists, idxs = tree.query(rep.vertices)
+                rep.vertex_normals = orig.vertex_normals[idxs]
+            self.mesh_reparada = rep
+            self.gl_reparada.clear()
+            item = create_glmeshitem(rep, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(rep, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, rep)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro ao Transferir Normais', f'Não foi possível transferir as normais.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
