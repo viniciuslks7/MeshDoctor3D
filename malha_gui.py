@@ -178,6 +178,10 @@ class MeshRepairApp(QMainWindow):
         self.action_weighted_normals.triggered.connect(self.weighted_normals)
         self.menu_sombreamento.addAction(self.action_weighted_normals)
         self.action_weighted_normals.setEnabled(False)
+        self.action_split_normals = QAction('Split Normals (Hard Edges)', self)
+        self.action_split_normals.triggered.connect(self.split_normals_dialog)
+        self.menu_sombreamento.addAction(self.action_split_normals)
+        self.action_split_normals.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -208,6 +212,7 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_smooth.setEnabled(False)
         self.action_transfer_normals.setEnabled(False)
         self.action_weighted_normals.setEnabled(False)
+        self.action_split_normals.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -255,6 +260,7 @@ class MeshRepairApp(QMainWindow):
             self.action_auto_smooth.setEnabled(False)
             self.action_transfer_normals.setEnabled(False)
             self.action_weighted_normals.setEnabled(False)
+            self.action_split_normals.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -335,6 +341,7 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_smooth.setEnabled(True)
         self.action_transfer_normals.setEnabled(True)
         self.action_weighted_normals.setEnabled(True)
+        self.action_split_normals.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -914,6 +921,65 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, mesh)
         except Exception as e:
             QMessageBox.warning(self, 'Erro em Weighted Normals', f'Não foi possível aplicar Weighted Normals.\n{e}')
+
+    def split_normals_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        angulo, ok = QInputDialog.getDouble(self, 'Split Normals (Hard Edges)', 'Ângulo limite (graus):', 30.0, 1.0, 180.0, 1)
+        if ok:
+            self.split_normals(angulo)
+
+    def split_normals(self, angle_limit):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            verts = mesh.vertices
+            faces = mesh.faces
+            face_normals = mesh.face_normals
+            # Identifica arestas vivas
+            rad_limit = np.deg2rad(angle_limit)
+            hard_edges = set()
+            for (f1, f2), edge in zip(mesh.face_adjacency, mesh.face_adjacency_edges):
+                n1 = face_normals[f1]
+                n2 = face_normals[f2]
+                angle = np.arccos(np.clip(np.dot(n1, n2), -1.0, 1.0))
+                if angle > rad_limit:
+                    hard_edges.add(tuple(sorted(edge)))
+            # Duplicar vértices nas arestas vivas
+            new_verts = verts.tolist()
+            new_faces = []
+            vert_map = {}  # (orig_idx, face_idx) -> new_idx
+            for i, face in enumerate(faces):
+                new_face = []
+                for j, idx in enumerate(face):
+                    prev = face[j-1]
+                    edge = tuple(sorted((idx, prev)))
+                    if edge in hard_edges:
+                        # Duplicar vértice para esta face
+                        key = (idx, i)
+                        if key not in vert_map:
+                            new_verts.append(verts[idx].tolist())
+                            vert_map[key] = len(new_verts) - 1
+                        new_face.append(vert_map[key])
+                    else:
+                        new_face.append(idx)
+                new_faces.append(new_face)
+            new_verts = np.array(new_verts)
+            new_faces = np.array(new_faces)
+            split_mesh = trimesh.Trimesh(vertices=new_verts, faces=new_faces, process=True)
+            self.mesh_reparada = split_mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(split_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(split_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, split_mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro em Split Normals', f'Não foi possível aplicar Split Normals.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
