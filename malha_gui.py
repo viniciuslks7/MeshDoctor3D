@@ -152,6 +152,10 @@ class MeshRepairApp(QMainWindow):
         self.action_exportar_atributos = QAction('Exportar Atributos PyMeshLab', self)
         self.action_exportar_atributos.triggered.connect(self.exportar_atributos_pymeshlab)
         self.menu_topologia.addAction(self.action_exportar_atributos)
+        self.action_auto_retopo = QAction('Auto Retopology', self)
+        self.action_auto_retopo.triggered.connect(self.auto_retopology_dialog)
+        self.menu_topologia.addAction(self.action_auto_retopo)
+        self.action_auto_retopo.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -176,6 +180,7 @@ class MeshRepairApp(QMainWindow):
         self.action_remesh.setEnabled(False)
         # self.action_remesh_quadriflow.setEnabled(False) # Removido
         self.action_remesh_surface.setEnabled(False)
+        self.action_auto_retopo.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -217,6 +222,7 @@ class MeshRepairApp(QMainWindow):
             self.action_remove_degenerate.setEnabled(False)
             self.action_remesh.setEnabled(False)
             self.action_remesh_surface.setEnabled(False)
+            self.action_auto_retopo.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -291,6 +297,7 @@ class MeshRepairApp(QMainWindow):
         self.action_remove_degenerate.setEnabled(True)
         self.action_remesh.setEnabled(True)
         self.action_remesh_surface.setEnabled(True)
+        self.action_auto_retopo.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -658,6 +665,60 @@ class MeshRepairApp(QMainWindow):
             f.write(atributos_str)
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.information(self, 'Exportação concluída', 'Lista de atributos salva em atributos_pymeshlab.txt')
+
+    def auto_retopology_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        faces, ok1 = QInputDialog.getInt(self, 'Auto Retopology', 'Número alvo de faces (simplificação):', 1000, 100, 100000, 1)
+        if not ok1:
+            return
+        edge, ok2 = QInputDialog.getDouble(self, 'Auto Retopology', 'Comprimento alvo da aresta (remesh):', 1.0, 0.001, 100.0, 3)
+        if not ok2 or edge <= 0:
+            return
+        self.auto_retopology(faces, edge)
+
+    def auto_retopology(self, target_faces, edge_length):
+        if self.mesh_reparada is None:
+            return
+        import pymeshlab
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            # 1. Simplificação
+            m = self.mesh_reparada
+            ms = pymeshlab.MeshSet()
+            ms.add_mesh(pymeshlab.Mesh(m.vertices, m.faces))
+            ms.meshing_decimation_quadric_edge_collapse(targetfacenum=target_faces, preservenormal=True)
+            new_mesh = ms.current_mesh()
+            vertices = np.array(new_mesh.vertex_matrix())
+            faces = np.array(new_mesh.face_matrix())
+            simplified = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+            # 2. Remesh Surface
+            ms = pymeshlab.MeshSet()
+            ms.add_mesh(pymeshlab.Mesh(simplified.vertices, simplified.faces))
+            ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PureValue(edge_length))
+            new_mesh = ms.current_mesh()
+            vertices = np.array(new_mesh.vertex_matrix())
+            faces = np.array(new_mesh.face_matrix())
+            remeshed = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+            # 3. Suavização
+            ms = pymeshlab.MeshSet()
+            ms.add_mesh(pymeshlab.Mesh(remeshed.vertices, remeshed.faces))
+            ms.apply_coord_laplacian_smoothing(stepsmoothnum=10)
+            new_mesh = ms.current_mesh()
+            vertices = np.array(new_mesh.vertex_matrix())
+            faces = np.array(new_mesh.face_matrix())
+            final_mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+            final_mesh = centralizar_na_origem(final_mesh)
+            self.mesh_reparada = final_mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(final_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(final_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, final_mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro no Auto Retopology', f'Não foi possível executar auto retopologia.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
