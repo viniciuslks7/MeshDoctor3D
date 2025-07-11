@@ -156,6 +156,16 @@ class MeshRepairApp(QMainWindow):
         self.action_auto_retopo.triggered.connect(self.auto_retopology_dialog)
         self.menu_topologia.addAction(self.action_auto_retopo)
         self.action_auto_retopo.setEnabled(False)
+        # Novo menu Sombreamento
+        self.menu_sombreamento = self.menu_bar.addMenu('Sombreamento')
+        self.action_shade_smooth = QAction('Shade Smooth', self)
+        self.action_shade_smooth.triggered.connect(self.shade_smooth)
+        self.menu_sombreamento.addAction(self.action_shade_smooth)
+        self.action_shade_smooth.setEnabled(False)
+        self.action_shade_flat = QAction('Shade Flat', self)
+        self.action_shade_flat.triggered.connect(self.shade_flat)
+        self.menu_sombreamento.addAction(self.action_shade_flat)
+        self.action_shade_flat.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -181,6 +191,8 @@ class MeshRepairApp(QMainWindow):
         # self.action_remesh_quadriflow.setEnabled(False) # Removido
         self.action_remesh_surface.setEnabled(False)
         self.action_auto_retopo.setEnabled(False)
+        self.action_shade_smooth.setEnabled(False)
+        self.action_shade_flat.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -223,6 +235,8 @@ class MeshRepairApp(QMainWindow):
             self.action_remesh.setEnabled(False)
             self.action_remesh_surface.setEnabled(False)
             self.action_auto_retopo.setEnabled(False)
+            self.action_shade_smooth.setEnabled(False)
+            self.action_shade_flat.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -298,6 +312,8 @@ class MeshRepairApp(QMainWindow):
         self.action_remesh.setEnabled(True)
         self.action_remesh_surface.setEnabled(True)
         self.action_auto_retopo.setEnabled(True)
+        self.action_shade_smooth.setEnabled(True)
+        self.action_shade_flat.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -719,6 +735,41 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, final_mesh)
         except Exception as e:
             QMessageBox.warning(self, 'Erro no Auto Retopology', f'Não foi possível executar auto retopologia.\n{e}')
+
+    def shade_smooth(self):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+            self.mesh_reparada = mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro no Shade Smooth', f'Não foi possível aplicar Shade Smooth.\n{e}')
+
+    def shade_flat(self):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+            mesh.vertex_normals = None
+            self.mesh_reparada = mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro no Shade Flat', f'Não foi possível aplicar Shade Flat.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
