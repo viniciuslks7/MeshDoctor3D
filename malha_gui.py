@@ -130,6 +130,28 @@ class MeshRepairApp(QMainWindow):
         self.action_remove_degenerate.triggered.connect(self.remover_faces_degeneradas)
         self.menu_topologia.addAction(self.action_remove_degenerate)
         self.action_remove_degenerate.setEnabled(False)
+        self.action_remesh = QAction('Remesh (Voxel)', self)
+        self.action_remesh.triggered.connect(self.remesh_voxel_dialog)
+        self.menu_topologia.addAction(self.action_remesh)
+        self.action_remesh.setEnabled(False)
+        # Remover Quadriflow do menu e do código
+        # self.action_remesh_quadriflow = QAction('Remesh (Quadriflow)', self)
+        # self.action_remesh_quadriflow.triggered.connect(self.remesh_quadriflow_dialog)
+        # self.menu_topologia.addAction(self.action_remesh_quadriflow)
+        # self.action_remesh_quadriflow.setEnabled(False)
+        self.action_remesh_surface = QAction('Remesh (Surface)', self)
+        self.action_remesh_surface.triggered.connect(self.remesh_surface_dialog)
+        self.menu_topologia.addAction(self.action_remesh_surface)
+        self.action_remesh_surface.setEnabled(False)
+        self.action_listar_metodos = QAction('Listar Métodos PyMeshLab', self)
+        self.action_listar_metodos.triggered.connect(self.listar_metodos_pymeshlab)
+        self.menu_topologia.addAction(self.action_listar_metodos)
+        self.action_exportar_metodos = QAction('Exportar Métodos PyMeshLab', self)
+        self.action_exportar_metodos.triggered.connect(self.exportar_metodos_pymeshlab)
+        self.menu_topologia.addAction(self.action_exportar_metodos)
+        self.action_exportar_atributos = QAction('Exportar Atributos PyMeshLab', self)
+        self.action_exportar_atributos.triggered.connect(self.exportar_atributos_pymeshlab)
+        self.menu_topologia.addAction(self.action_exportar_atributos)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -151,6 +173,9 @@ class MeshRepairApp(QMainWindow):
         self.action_triangulate.setEnabled(False)
         self.action_quadrangulate.setEnabled(False)
         self.action_remove_degenerate.setEnabled(False)
+        self.action_remesh.setEnabled(False)
+        # self.action_remesh_quadriflow.setEnabled(False) # Removido
+        self.action_remesh_surface.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -190,6 +215,8 @@ class MeshRepairApp(QMainWindow):
             self.action_triangulate.setEnabled(False)
             self.action_quadrangulate.setEnabled(False)
             self.action_remove_degenerate.setEnabled(False)
+            self.action_remesh.setEnabled(False)
+            self.action_remesh_surface.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -262,6 +289,8 @@ class MeshRepairApp(QMainWindow):
         self.action_triangulate.setEnabled(True)
         self.action_quadrangulate.setEnabled(True)
         self.action_remove_degenerate.setEnabled(True)
+        self.action_remesh.setEnabled(True)
+        self.action_remesh_surface.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -540,6 +569,95 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, cleaned)
         except Exception as e:
             QMessageBox.warning(self, 'Erro ao Remover Faces Degeneradas', f'Não foi possível remover faces degeneradas.\n{e}')
+
+    def remesh_voxel_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        tamanho, ok = QInputDialog.getDouble(self, 'Remesh (Voxel)', 'Tamanho do voxel:', 1.0, 0.001, 100.0, 3)
+        if ok:
+            self.remesh_voxel(tamanho)
+
+    def remesh_voxel(self, voxel_size):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            # Voxel remesh
+            v = mesh.voxelized(voxel_size)
+            remeshed = v.as_boxes()
+            remeshed = centralizar_na_origem(remeshed)
+            self.mesh_reparada = remeshed
+            self.gl_reparada.clear()
+            item = create_glmeshitem(remeshed, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(remeshed, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, remeshed)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro ao Remesh', f'Não foi possível refazer a malha (remesh).\n{e}')
+
+    def remesh_surface_dialog(self):
+        if self.mesh_reparada is None:
+            return
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+        length, ok = QInputDialog.getDouble(self, 'Remesh (Surface)', 'Comprimento alvo da aresta:', 1.0, 0.001, 100.0, 3)
+        if ok:
+            if length <= 0:
+                QMessageBox.warning(self, 'Valor inválido', 'O comprimento da aresta deve ser positivo.')
+                return
+            self.remesh_surface(length)
+
+    def remesh_surface(self, edge_length):
+        if self.mesh_reparada is None:
+            return
+        import pymeshlab
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            m = self.mesh_reparada
+            ms = pymeshlab.MeshSet()
+            ms.add_mesh(pymeshlab.Mesh(m.vertices, m.faces))
+            ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PureValue(edge_length))
+            new_mesh = ms.current_mesh()
+            vertices = np.array(new_mesh.vertex_matrix())
+            faces = np.array(new_mesh.face_matrix())
+            remeshed = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+            remeshed = centralizar_na_origem(remeshed)
+            self.mesh_reparada = remeshed
+            self.gl_reparada.clear()
+            item = create_glmeshitem(remeshed, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(remeshed, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, remeshed)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro ao Remesh (Surface)', f'Não foi possível refazer a malha por superfície.\n{e}')
+
+    def listar_metodos_pymeshlab(self):
+        import pymeshlab
+        from PyQt5.QtWidgets import QMessageBox
+        metodos = dir(pymeshlab.MeshSet)
+        metodos_str = '\n'.join([m for m in metodos if not m.startswith('_')])
+        QMessageBox.information(self, 'Métodos do PyMeshLab.MeshSet', metodos_str)
+
+    def exportar_metodos_pymeshlab(self):
+        import pymeshlab
+        metodos = dir(pymeshlab.MeshSet)
+        metodos_str = '\n'.join([m for m in metodos if not m.startswith('_')])
+        with open('metodos_pymeshlab.txt', 'w', encoding='utf-8') as f:
+            f.write(metodos_str)
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(self, 'Exportação concluída', 'Lista de métodos salva em metodos_pymeshlab.txt')
+
+    def exportar_atributos_pymeshlab(self):
+        import pymeshlab
+        atributos = dir(pymeshlab)
+        atributos_str = '\n'.join([a for a in atributos if not a.startswith('_')])
+        with open('atributos_pymeshlab.txt', 'w', encoding='utf-8') as f:
+            f.write(atributos_str)
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(self, 'Exportação concluída', 'Lista de atributos salva em atributos_pymeshlab.txt')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
