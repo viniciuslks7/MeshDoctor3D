@@ -174,6 +174,10 @@ class MeshRepairApp(QMainWindow):
         self.action_transfer_normals.triggered.connect(self.transferir_normais)
         self.menu_sombreamento.addAction(self.action_transfer_normals)
         self.action_transfer_normals.setEnabled(False)
+        self.action_weighted_normals = QAction('Weighted Normals', self)
+        self.action_weighted_normals.triggered.connect(self.weighted_normals)
+        self.menu_sombreamento.addAction(self.action_weighted_normals)
+        self.action_weighted_normals.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -203,6 +207,7 @@ class MeshRepairApp(QMainWindow):
         self.action_shade_flat.setEnabled(False)
         self.action_auto_smooth.setEnabled(False)
         self.action_transfer_normals.setEnabled(False)
+        self.action_weighted_normals.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -249,6 +254,7 @@ class MeshRepairApp(QMainWindow):
             self.action_shade_flat.setEnabled(False)
             self.action_auto_smooth.setEnabled(False)
             self.action_transfer_normals.setEnabled(False)
+            self.action_weighted_normals.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -328,6 +334,7 @@ class MeshRepairApp(QMainWindow):
         self.action_shade_flat.setEnabled(True)
         self.action_auto_smooth.setEnabled(True)
         self.action_transfer_normals.setEnabled(True)
+        self.action_weighted_normals.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -873,6 +880,40 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, rep)
         except Exception as e:
             QMessageBox.warning(self, 'Erro ao Transferir Normais', f'Não foi possível transferir as normais.\n{e}')
+
+    def weighted_normals(self):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox
+        try:
+            mesh = self.mesh_reparada.copy()
+            verts = mesh.vertices
+            faces = mesh.faces
+            face_normals = mesh.face_normals
+            face_areas = mesh.area_faces
+            vertex_normals = np.zeros_like(verts)
+            weights = np.zeros(len(verts))
+            for i, face in enumerate(faces):
+                area = face_areas[i]
+                for idx in face:
+                    vertex_normals[idx] += face_normals[i] * area
+                    weights[idx] += area
+            mask = weights > 0
+            vertex_normals[mask] /= weights[mask][:,None]
+            norms = np.linalg.norm(vertex_normals, axis=1)
+            mask = norms > 0
+            vertex_normals[mask] /= norms[mask][:,None]
+            mesh.vertex_normals = vertex_normals
+            self.mesh_reparada = mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, mesh)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro em Weighted Normals', f'Não foi possível aplicar Weighted Normals.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
