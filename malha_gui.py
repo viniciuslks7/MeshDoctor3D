@@ -182,6 +182,12 @@ class MeshRepairApp(QMainWindow):
         self.action_split_normals.triggered.connect(self.split_normals_dialog)
         self.menu_sombreamento.addAction(self.action_split_normals)
         self.action_split_normals.setEnabled(False)
+        # Novo menu Malha e Estrutura
+        self.menu_malha = self.menu_bar.addMenu('Malha e Estrutura')
+        self.action_mesh_cleanup = QAction('Mesh Cleanup / Delete Loose Geometry', self)
+        self.action_mesh_cleanup.triggered.connect(self.mesh_cleanup)
+        self.menu_malha.addAction(self.action_mesh_cleanup)
+        self.action_mesh_cleanup.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -213,6 +219,7 @@ class MeshRepairApp(QMainWindow):
         self.action_transfer_normals.setEnabled(False)
         self.action_weighted_normals.setEnabled(False)
         self.action_split_normals.setEnabled(False)
+        self.action_mesh_cleanup.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -261,6 +268,7 @@ class MeshRepairApp(QMainWindow):
             self.action_transfer_normals.setEnabled(False)
             self.action_weighted_normals.setEnabled(False)
             self.action_split_normals.setEnabled(False)
+            self.action_mesh_cleanup.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -342,6 +350,7 @@ class MeshRepairApp(QMainWindow):
         self.action_transfer_normals.setEnabled(True)
         self.action_weighted_normals.setEnabled(True)
         self.action_split_normals.setEnabled(True)
+        self.action_mesh_cleanup.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -980,6 +989,39 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, split_mesh)
         except Exception as e:
             QMessageBox.warning(self, 'Erro em Split Normals', f'Não foi possível aplicar Split Normals.\n{e}')
+
+    def mesh_cleanup(self):
+        if self.mesh_reparada is None:
+            return
+        import trimesh
+        import numpy as np
+        from PyQt5.QtWidgets import QMessageBox, QInputDialog
+        try:
+            mesh = self.mesh_reparada.copy()
+            # Remover componentes desconectados pequenos
+            min_faces, ok = QInputDialog.getInt(self, 'Mesh Cleanup', 'Mínimo de faces por componente para manter:', 50, 1, 10000, 1)
+            if not ok:
+                return
+            comps = mesh.split(only_watertight=False)
+            comps = [c for c in comps if len(c.faces) >= min_faces]
+            if not comps:
+                QMessageBox.warning(self, 'Mesh Cleanup', 'Nenhuma componente atende ao critério. Nada foi removido.')
+                return
+            cleaned = trimesh.util.concatenate(comps)
+            # Remover vértices soltos
+            mask = np.unique(cleaned.faces)
+            cleaned.vertices = cleaned.vertices[mask]
+            remap = {old: new for new, old in enumerate(mask)}
+            cleaned.faces = np.vectorize(remap.get)(cleaned.faces)
+            cleaned = trimesh.Trimesh(vertices=cleaned.vertices, faces=cleaned.faces, process=True)
+            self.mesh_reparada = cleaned
+            self.gl_reparada.clear()
+            item = create_glmeshitem(cleaned, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(cleaned, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, cleaned)
+        except Exception as e:
+            QMessageBox.warning(self, 'Erro em Mesh Cleanup', f'Não foi possível limpar a malha.\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
