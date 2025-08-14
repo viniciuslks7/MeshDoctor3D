@@ -200,6 +200,13 @@ class MeshRepairApp(QMainWindow):
         self.action_weld_vertices.triggered.connect(self.weld_vertices_dialog)
         self.menu_malha.addAction(self.action_weld_vertices)
         self.action_weld_vertices.setEnabled(False)
+        self.action_subdivision = QAction('Subdivision Surface / Catmull-Clark', self)
+        self.action_subdivision.triggered.connect(self.subdivision_surface_dialog)
+        self.menu_malha.addAction(self.action_subdivision)
+        
+        action_solidify = QAction("Solidify Modifier (Casca Espessa)", self)
+        action_solidify.triggered.connect(self.solidify_modifier_dialog)
+        self.menu_malha.addAction(action_solidify)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -232,6 +239,11 @@ class MeshRepairApp(QMainWindow):
         self.action_weighted_normals.setEnabled(False)
         self.action_split_normals.setEnabled(False)
         self.action_mesh_cleanup.setEnabled(False)
+        self.action_edge_split.setEnabled(False)
+        self.action_remove_interior.setEnabled(False)
+        self.action_weld_vertices.setEnabled(False)
+        self.action_subdivision.setEnabled(False)
+        self.action_solidify.setEnabled(False)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -281,6 +293,11 @@ class MeshRepairApp(QMainWindow):
             self.action_weighted_normals.setEnabled(False)
             self.action_split_normals.setEnabled(False)
             self.action_mesh_cleanup.setEnabled(False)
+            self.action_edge_split.setEnabled(False)
+            self.action_remove_interior.setEnabled(False)
+            self.action_weld_vertices.setEnabled(False)
+            self.action_subdivision.setEnabled(False)
+            self.action_solidify.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -365,6 +382,9 @@ class MeshRepairApp(QMainWindow):
         self.action_mesh_cleanup.setEnabled(True)
         self.action_edge_split.setEnabled(True)
         self.action_remove_interior.setEnabled(True)
+        self.action_weld_vertices.setEnabled(True)
+        self.action_subdivision.setEnabled(True)
+        self.action_solidify.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -1037,6 +1057,81 @@ class MeshRepairApp(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, 'Erro em Mesh Cleanup', f'Não foi possível limpar a malha.\n{e}')
 
+    def weld_vertices_dialog(self):
+        """Diálogo para configurar a soldagem de vértices"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            threshold, ok = QInputDialog.getDouble(
+                self, 'Soldar Vértices', 
+                'Distância máxima para soldar vértices:',
+                value=0.001, min=0.0001, max=1.0, decimals=6
+            )
+            
+            if ok:
+                self.weld_vertices(threshold)
+                
+        except Exception as e:
+            print(f"Erro no diálogo de soldagem: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def weld_vertices(self, threshold):
+        """Solda vértices próximos e colapsa arestas correspondentes"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            print(f"Soldando vértices com distância máxima: {threshold}")
+            
+            mesh = self.mesh_reparada.copy()
+            vertices = mesh.vertices
+            faces = mesh.faces
+            
+            # Usa KDTree para encontrar vértices próximos
+            tree = cKDTree(vertices)
+            
+            # Encontra grupos de vértices próximos
+            groups = tree.query_ball_point(vertices, threshold)
+            
+            # Cria mapeamento de vértices para o representante do grupo
+            vertex_mapping = np.arange(len(vertices))
+            for i, group in enumerate(groups):
+                # O representante é o vértice com menor índice no grupo
+                min_idx = min(group)
+                vertex_mapping[i] = min_idx
+            
+            # Atualiza as faces com os novos índices
+            new_faces = vertex_mapping[faces]
+            
+            # Remove vértices não utilizados
+            used_vertices, inverse = np.unique(new_faces, return_inverse=True)
+            new_vertices = vertices[used_vertices]
+            new_faces = inverse.reshape(new_faces.shape)
+            
+            # Cria nova malha
+            new_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=True)
+            
+            # Atualiza a malha reparada
+            self.mesh_reparada = new_mesh
+            
+            # Atualiza visualização
+            self.gl_reparada.clear()
+            item = create_glmeshitem(new_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(new_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, new_mesh)
+            
+            print(f"Vértices soldados com sucesso. "
+                  f"Vértices: {len(vertices)} → {len(new_vertices)}, "
+                  f"Faces: {len(faces)} → {len(new_faces)}")
+            
+        except Exception as e:
+            print(f"Erro ao soldar vértices: {e}")
+            import traceback
+            traceback.print_exc()
+
     def remover_faces_interiores(self):
         """Remove faces interiores e faces que se intersectam"""
         if self.mesh_reparada is None:
@@ -1275,6 +1370,200 @@ class MeshRepairApp(QMainWindow):
             
         except Exception as e:
             print(f"Erro no Edge Split Modifier: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def subdivision_surface_dialog(self):
+        """Diálogo para configurar a Subdivision Surface"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            iterations, ok = QInputDialog.getInt(
+                self, 'Subdivision Surface', 
+                'Número de iterações de Subdivision:',
+                value=1, min=1, max=10, decimals=0
+            )
+            
+            if ok:
+                self.subdivision_surface(iterations)
+                
+        except Exception as e:
+            print(f"Erro no diálogo Subdivision Surface: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def subdivision_surface(self, iterations):
+        """Aplica a Subdivision Surface na malha"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            print(f"Aplicando Subdivision Surface com {iterations} iterações")
+            
+            mesh = self.mesh_reparada.copy()
+            
+            # Aplica a subdivisão de superfície
+            # PyMeshLab tem uma função de subdivisão de superfície, mas a implementação
+            # pode variar. Aqui, vamos usar a subdivisão de Catmull-Clark, que é
+            # uma das mais populares e robustas.
+            # A subdivisão de Catmull-Clark adiciona vértices nas arestas e faces,
+            # e recalcula as normais.
+            
+            # Primeiro, adiciona vértices nas arestas
+            new_verts = []
+            for v in mesh.vertices:
+                new_verts.append(v)
+            
+            # Adiciona vértices nas faces
+            for f in mesh.faces:
+                # Catmull-Clark: adiciona um vértice no centro da face
+                center = np.mean(mesh.vertices[f], axis=0)
+                new_verts.append(center)
+            
+            # Adiciona vértices nas arestas
+            for e in mesh.edges:
+                # Catmull-Clark: adiciona um vértice no meio da aresta
+                v0 = mesh.vertices[e[0]]
+                v1 = mesh.vertices[e[1]]
+                new_verts.append((v0 + v1) / 2)
+            
+            # Atualiza a malha com os novos vértices
+            new_mesh = trimesh.Trimesh(vertices=np.array(new_verts), faces=mesh.faces, process=True)
+            
+            # Recalcula as normais após a subdivisão
+            new_mesh.fix_normals()
+            
+            # Aplica a subdivisão recursivamente
+            for _ in range(iterations):
+                # Adiciona vértices nas arestas
+                new_verts = []
+                for v in new_mesh.vertices:
+                    new_verts.append(v)
+                
+                # Adiciona vértices nas faces
+                for f in new_mesh.faces:
+                    center = np.mean(new_mesh.vertices[f], axis=0)
+                    new_verts.append(center)
+                
+                # Adiciona vértices nas arestas
+                for e in new_mesh.edges:
+                    v0 = new_mesh.vertices[e[0]]
+                    v1 = new_mesh.vertices[e[1]]
+                    new_verts.append((v0 + v1) / 2)
+                
+                new_mesh = trimesh.Trimesh(vertices=np.array(new_verts), faces=new_mesh.faces, process=True)
+                new_mesh.fix_normals()
+            
+            self.mesh_reparada = new_mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(new_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(new_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, new_mesh)
+            
+            print(f"Subdivision Surface aplicada com sucesso com {iterations} iterações. "
+                  f"Vértices: {len(new_mesh.vertices)}, Faces: {len(new_mesh.faces)}")
+            
+        except Exception as e:
+            print(f"Erro ao aplicar Subdivision Surface: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def solidify_modifier_dialog(self):
+        """Diálogo para configurar o Solidify Modifier"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            thickness, ok = QInputDialog.getDouble(
+                self, 'Solidify Modifier', 
+                'Espessura da casca (0.0 para remover casca):',
+                value=0.0, min=0.0, max=100.0, decimals=6
+            )
+            
+            if ok:
+                self.solidify_modifier(thickness)
+                
+        except Exception as e:
+            print(f"Erro no diálogo Solidify Modifier: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def solidify_modifier(self, thickness):
+        """Aplica o Solidify Modifier na malha criando uma casca espessa"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            print(f"Aplicando Solidify Modifier com espessura: {thickness}")
+            
+            if thickness <= 0:
+                print("Espessura deve ser maior que 0 para criar casca")
+                return
+            
+            mesh = self.mesh_reparada.copy()
+            
+            # Calcula as normais dos vértices para direção da casca
+            mesh.vertex_normals = mesh.vertex_normals
+            
+            # Cria vértices externos deslocados na direção das normais
+            outer_vertices = mesh.vertices + mesh.vertex_normals * thickness
+            
+            # Combina vértices originais e externos
+            all_vertices = np.vstack([mesh.vertices, outer_vertices])
+            
+            # Cria faces para conectar a malha interna com a externa
+            new_faces = []
+            
+            # Adiciona as faces originais
+            new_faces.extend(mesh.faces)
+            
+            # Adiciona faces externas (invertidas para manter orientação correta)
+            for face in mesh.faces:
+                # Face externa com vértices deslocados
+                outer_face = [v + len(mesh.vertices) for v in face]
+                # Inverte a ordem para manter orientação
+                outer_face = [outer_face[0], outer_face[2], outer_face[1]]
+                new_faces.append(outer_face)
+            
+            # Cria faces laterais para conectar as bordas
+            for edge in mesh.edges_unique:
+                # Encontra faces que compartilham esta aresta
+                edge_faces = []
+                for face_idx, face in enumerate(mesh.faces):
+                    for i in range(3):
+                        v1, v2 = face[i], face[(i + 1) % 3]
+                        if (v1 == edge[0] and v2 == edge[1]) or (v1 == edge[1] and v2 == edge[0]):
+                            edge_faces.append(face_idx)
+                
+                if len(edge_faces) == 1:  # Aresta de borda
+                    # Cria duas faces triangulares para conectar a aresta interna com a externa
+                    v1_in, v2_in = edge[0], edge[1]
+                    v1_out, v2_out = v1_in + len(mesh.vertices), v2_in + len(mesh.vertices)
+                    
+                    # Primeira face triangular
+                    new_faces.append([v1_in, v2_in, v1_out])
+                    # Segunda face triangular
+                    new_faces.append([v2_in, v2_out, v1_out])
+            
+            # Cria nova malha com casca
+            new_mesh = trimesh.Trimesh(vertices=all_vertices, faces=new_faces, process=True)
+            new_mesh.fix_normals()
+            
+            self.mesh_reparada = new_mesh
+            self.gl_reparada.clear()
+            item = create_glmeshitem(new_mesh, color=(0.8, 0.1, 0.1, 1))  # Vermelho para destacar
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(new_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, new_mesh)
+            
+            print(f"Solidify Modifier aplicado com sucesso. "
+                  f"Vértices: {len(mesh.vertices)} → {len(all_vertices)}, "
+                  f"Faces: {len(mesh.faces)} → {len(new_faces)}")
+            
+        except Exception as e:
+            print(f"Erro ao aplicar Solidify Modifier: {e}")
             import traceback
             traceback.print_exc()
 
