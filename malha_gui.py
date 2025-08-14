@@ -3,7 +3,7 @@ import trimesh
 import pymeshfix
 import numpy as np
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QSizePolicy, QDoubleSpinBox, QMainWindow, QAction, QMenuBar, QInputDialog
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QSizePolicy, QDoubleSpinBox, QMainWindow, QAction, QMenuBar, QInputDialog, QMessageBox
 )
 from pyqtgraph.opengl import GLViewWidget, MeshData, GLMeshItem, GLLinePlotItem
 from PyQt5.QtCore import Qt
@@ -244,6 +244,17 @@ class MeshRepairApp(QMainWindow):
         self.action_weld_vertices.setEnabled(False)
         self.action_subdivision.setEnabled(False)
         self.action_solidify.setEnabled(False)
+        self.action_mesh_stats.setEnabled(False)
+        
+        # Menu Malha e Estrutura
+        menu_malha_estrutura = self.menu_malha.addMenu('Malha e Estrutura')
+        
+        # Menu Verificações e Diagnóstico
+        menu_verificacoes = self.menu_bar.addMenu('Verificações e Diagnóstico')
+        
+        action_mesh_stats = QAction("Estatísticas da Malha (N-gons, Tris, Pólos)", self)
+        action_mesh_stats.triggered.connect(self.estatisticas_malha_dialog)
+        menu_verificacoes.addAction(action_mesh_stats)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -385,6 +396,7 @@ class MeshRepairApp(QMainWindow):
         self.action_weld_vertices.setEnabled(True)
         self.action_subdivision.setEnabled(True)
         self.action_solidify.setEnabled(True)
+        self.action_mesh_stats.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -1566,6 +1578,174 @@ class MeshRepairApp(QMainWindow):
             print(f"Erro ao aplicar Solidify Modifier: {e}")
             import traceback
             traceback.print_exc()
+
+    def estatisticas_malha_dialog(self):
+        """Diálogo para mostrar estatísticas detalhadas da malha"""
+        if self.mesh_reparada is None:
+            QMessageBox.information(self, 'Estatísticas', 'Carregue e repare uma malha primeiro.')
+            return
+        
+        try:
+            self.estatisticas_malha()
+        except Exception as e:
+            print(f"Erro ao gerar estatísticas: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def estatisticas_malha(self):
+        """Gera estatísticas detalhadas da malha incluindo N-gons, triângulos e pólos"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            mesh = self.mesh_reparada
+            print("=== ESTATÍSTICAS DETALHADAS DA MALHA ===")
+            
+            # Estatísticas básicas
+            num_vertices = len(mesh.vertices)
+            num_faces = len(mesh.faces)
+            num_edges = len(mesh.edges_unique)
+            
+            print(f"Vértices: {num_vertices}")
+            print(f"Faces: {num_faces}")
+            print(f"Arestas únicas: {num_edges}")
+            
+            # Análise de tipos de faces (N-gons)
+            face_vertex_counts = {}
+            for face in mesh.faces:
+                num_verts = len(face)
+                face_vertex_counts[num_verts] = face_vertex_counts.get(num_verts, 0) + 1
+            
+            print("\n=== TIPOS DE FACES ===")
+            for num_verts, count in sorted(face_vertex_counts.items()):
+                if num_verts == 3:
+                    print(f"Triângulos: {count}")
+                elif num_verts == 4:
+                    print(f"Quads: {count}")
+                else:
+                    print(f"{num_verts}-gons: {count}")
+            
+            # Análise de pólos (vértices com número anormal de arestas)
+            vertex_edge_counts = {}
+            for edge in mesh.edges:
+                for vertex in edge:
+                    vertex_edge_counts[vertex] = vertex_edge_counts.get(vertex, 0) + 1
+            
+            pole_vertices = []
+            for vertex, edge_count in vertex_edge_counts.items():
+                if edge_count != 4:  # Vértices com 4 arestas são normais em malhas quad
+                    pole_vertices.append((vertex, edge_count))
+            
+            print(f"\n=== ANÁLISE DE PÓLOS ===")
+            print(f"Vértices com 4 arestas (normais): {len([v for v, c in pole_vertices if c == 4])}")
+            print(f"Vértices com 3 arestas (pólos): {len([v for v, c in pole_vertices if c == 3])}")
+            print(f"Vértices com 5+ arestas (pólos): {len([v for v, c in pole_vertices if c >= 5])}")
+            
+            # Análise de topologia
+            print(f"\n=== TOPOLOGIA ===")
+            print(f"Malha fechada (watertight): {mesh.is_watertight}")
+            print(f"Malha orientável: {mesh.is_winding_consistent}")
+            print(f"Volume: {mesh.volume:.6f}" if hasattr(mesh, 'volume') else "Volume: N/A")
+            print(f"Área da superfície: {mesh.area:.6f}")
+            
+            # Análise de qualidade
+            print(f"\n=== QUALIDADE DA MALHA ===")
+            
+            # Faces degeneradas (área muito pequena)
+            areas = mesh.area_faces
+            degenerate_faces = np.sum(areas < 1e-12)
+            print(f"Faces degeneradas (área < 1e-12): {degenerate_faces}")
+            
+            # Vértices duplicados
+            unique_vertices = np.unique(mesh.vertices, axis=0)
+            duplicate_vertices = num_vertices - len(unique_vertices)
+            print(f"Vértices duplicados: {duplicate_vertices}")
+            
+            # Arestas abertas (buracos)
+            if hasattr(mesh, 'edges_open'):
+                open_edges = len(mesh.edges_open)
+                print(f"Arestas abertas (buracos): {open_edges}")
+            else:
+                print("Arestas abertas: N/A")
+            
+            # Faces não-manifold
+            if hasattr(mesh, 'faces_nonmanifold'):
+                nonmanifold_faces = len(mesh.faces_nonmanifold)
+                print(f"Faces não-manifold: {nonmanifold_faces}")
+            else:
+                print("Faces não-manifold: N/A")
+            
+            # Análise de distribuição de faces
+            print(f"\n=== DISTRIBUIÇÃO DE FACES ===")
+            if len(areas) > 0:
+                print(f"Área média das faces: {np.mean(areas):.6f}")
+                print(f"Área mínima das faces: {np.min(areas):.6f}")
+                print(f"Área máxima das faces: {np.max(areas):.6f}")
+                print(f"Desvio padrão das áreas: {np.std(areas):.6f}")
+            
+            # Análise de ângulos das faces
+            print(f"\n=== ANÁLISE DE ÂNGULOS ===")
+            angles = []
+            for face in mesh.faces:
+                if len(face) == 3:  # Apenas triângulos
+                    v1, v2, v3 = mesh.vertices[face]
+                    a = np.linalg.norm(v2 - v1)
+                    b = np.linalg.norm(v3 - v2)
+                    c = np.linalg.norm(v1 - v3)
+                    
+                    # Lei dos cossenos
+                    cos_A = (b**2 + c**2 - a**2) / (2 * b * c)
+                    cos_B = (a**2 + c**2 - b**2) / (2 * a * c)
+                    cos_C = (a**2 + b**2 - c**2) / (2 * a * b)
+                    
+                    # Converte para graus
+                    angles.extend([np.arccos(np.clip(cos_A, -1, 1)) * 180 / np.pi,
+                                 np.arccos(np.clip(cos_B, -1, 1)) * 180 / np.pi,
+                                 np.arccos(np.clip(cos_C, -1, 1)) * 180 / np.pi])
+            
+            if angles:
+                angles = np.array(angles)
+                print(f"Ângulo mínimo: {np.min(angles):.2f}°")
+                print(f"Ângulo máximo: {np.max(angles):.2f}°")
+                print(f"Ângulo médio: {np.mean(angles):.2f}°")
+                
+                # Conta ângulos muito agudos ou obtusos
+                acute_angles = np.sum(angles < 30)
+                obtuse_angles = np.sum(angles > 150)
+                print(f"Ângulos muito agudos (< 30°): {acute_angles}")
+                print(f"Ângulos muito obtusos (> 150°): {obtuse_angles}")
+            
+            # Recomendações baseadas na análise
+            print(f"\n=== RECOMENDAÇÕES ===")
+            if degenerate_faces > 0:
+                print("⚠️  Considere remover faces degeneradas")
+            if duplicate_vertices > 0:
+                print("⚠️  Considere soldar vértices duplicados")
+            if 'open_edges' in locals() and open_edges > 0:
+                print("⚠️  Considere preencher buracos")
+            if 'nonmanifold_faces' in locals() and nonmanifold_faces > 0:
+                print("⚠️  Considere remover faces não-manifold")
+            if 'acute_angles' in locals() and acute_angles > 0:
+                print("⚠️  Considere suavizar ângulos muito agudos")
+            
+            print("=== FIM DAS ESTATÍSTICAS ===\n")
+            
+            # Mostra diálogo com resumo
+            QMessageBox.information(self, 'Estatísticas da Malha', 
+                f"Estatísticas geradas com sucesso!\n\n"
+                f"Vértices: {num_vertices}\n"
+                f"Faces: {num_faces}\n"
+                f"Triângulos: {face_vertex_counts.get(3, 0)}\n"
+                f"Quads: {face_vertex_counts.get(4, 0)}\n"
+                f"N-gons: {sum(count for verts, count in face_vertex_counts.items() if verts > 4)}\n"
+                f"Pólos: {len([v for v, c in pole_vertices if c != 4])}\n\n"
+                f"Verifique o console para detalhes completos.")
+            
+        except Exception as e:
+            print(f"Erro ao gerar estatísticas: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.warning(self, 'Erro', f'Erro ao gerar estatísticas:\n{e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
