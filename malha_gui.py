@@ -188,6 +188,10 @@ class MeshRepairApp(QMainWindow):
         self.action_mesh_cleanup.triggered.connect(self.mesh_cleanup)
         self.menu_malha.addAction(self.action_mesh_cleanup)
         self.action_mesh_cleanup.setEnabled(False)
+        self.action_edge_split = QAction('Edge Split Modifier', self)
+        self.action_edge_split.triggered.connect(self.edge_split_dialog)
+        self.menu_malha.addAction(self.action_edge_split)
+        self.action_edge_split.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -351,6 +355,7 @@ class MeshRepairApp(QMainWindow):
         self.action_weighted_normals.setEnabled(True)
         self.action_split_normals.setEnabled(True)
         self.action_mesh_cleanup.setEnabled(True)
+        self.action_edge_split.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -1022,6 +1027,140 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, cleaned)
         except Exception as e:
             QMessageBox.warning(self, 'Erro em Mesh Cleanup', f'Não foi possível limpar a malha.\n{e}')
+
+    def edge_split_dialog(self):
+        """Diálogo para configurar o Edge Split Modifier"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            angle_limit, ok = QInputDialog.getDouble(
+                self, 'Edge Split Modifier', 
+                'Ângulo limite para divisão de arestas (graus):',
+                value=30.0, min=0.0, max=180.0, decimals=1
+            )
+            
+            if ok:
+                self.edge_split_modifier(angle_limit)
+                
+        except Exception as e:
+            print(f"Erro no diálogo Edge Split: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def edge_split_modifier(self, angle_limit):
+        """Aplica o Edge Split Modifier na malha"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            print(f"Aplicando Edge Split Modifier com ângulo limite: {angle_limit}°")
+            
+            # Converte ângulo para radianos
+            angle_rad = np.radians(angle_limit)
+            
+            # Calcula normais das faces
+            face_normals = self.mesh_reparada.face_normals
+            
+            # Encontra arestas que precisam ser divididas
+            edges_to_split = set()
+            
+            # Para cada face, verifica suas arestas
+            for face_idx, face in enumerate(self.mesh_reparada.faces):
+                face_normal = face_normals[face_idx]
+                
+                # Para cada aresta da face
+                for i in range(3):
+                    edge = tuple(sorted([face[i], face[(i+1)%3]]))
+                    
+                    # Encontra faces adjacentes a esta aresta
+                    adjacent_faces = []
+                    for other_face_idx, other_face in enumerate(self.mesh_reparada.faces):
+                        if other_face_idx != face_idx:
+                            # Verifica se a aresta está presente na outra face
+                            for j in range(3):
+                                other_edge = tuple(sorted([other_face[j], other_face[(j+1)%3]]))
+                                if edge == other_edge:
+                                    adjacent_faces.append(other_face_idx)
+                                    break
+                    
+                    # Se há faces adjacentes, verifica o ângulo
+                    if adjacent_faces:
+                        for adj_face_idx in adjacent_faces:
+                            adj_normal = face_normals[adj_face_idx]
+                            
+                            # Calcula ângulo entre as normals
+                            dot_product = np.dot(face_normal, adj_normal)
+                            dot_product = np.clip(dot_product, -1.0, 1.0)
+                            angle = np.arccos(dot_product)
+                            
+                            # Se o ângulo é maior que o limite, marca para divisão
+                            if angle > angle_rad:
+                                edges_to_split.add(edge)
+                                break
+            
+            if not edges_to_split:
+                print("Nenhuma aresta precisa ser dividida")
+                return
+            
+            print(f"Dividindo {len(edges_to_split)} arestas")
+            
+            # Cria nova malha com vértices duplicados nas arestas divididas
+            new_vertices = list(self.mesh_reparada.vertices)
+            new_faces = []
+            
+            # Mapeia vértices originais para novos vértices
+            vertex_mapping = {}
+            
+            for face_idx, face in enumerate(self.mesh_reparada.faces):
+                new_face = []
+                
+                for i in range(3):
+                    vertex_idx = face[i]
+                    edge = tuple(sorted([face[i], face[(i+1)%3]]))
+                    
+                    # Se a aresta deve ser dividida, cria novo vértice
+                    if edge in edges_to_split:
+                        # Cria novo vértice duplicado
+                        new_vertex_idx = len(new_vertices)
+                        new_vertices.append(self.mesh_reparada.vertices[vertex_idx])
+                        
+                        # Mapeia o vértice original para o novo
+                        if vertex_idx not in vertex_mapping:
+                            vertex_mapping[vertex_idx] = {}
+                        vertex_mapping[vertex_idx][face_idx] = new_vertex_idx
+                        
+                        new_face.append(new_vertex_idx)
+                    else:
+                        # Usa vértice existente ou mapeado
+                        if vertex_idx in vertex_mapping and face_idx in vertex_mapping[vertex_idx]:
+                            new_face.append(vertex_mapping[vertex_idx][face_idx])
+                        else:
+                            new_face.append(vertex_idx)
+                
+                new_faces.append(new_face)
+            
+            # Cria nova malha
+            new_mesh = trimesh.Trimesh(vertices=np.array(new_vertices), faces=np.array(new_faces))
+            
+            # Atualiza a malha reparada
+            self.mesh_reparada = new_mesh
+            
+            # Atualiza visualização
+            self.gl_reparada.clear()
+            item = create_glmeshitem(new_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(new_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, new_mesh)
+            
+            print(f"Edge Split Modifier aplicado com sucesso. "
+                  f"Vértices: {len(self.mesh_reparada.vertices)}, "
+                  f"Faces: {len(self.mesh_reparada.faces)}")
+            
+        except Exception as e:
+            print(f"Erro no Edge Split Modifier: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
