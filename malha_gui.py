@@ -192,6 +192,10 @@ class MeshRepairApp(QMainWindow):
         self.action_edge_split.triggered.connect(self.edge_split_dialog)
         self.menu_malha.addAction(self.action_edge_split)
         self.action_edge_split.setEnabled(False)
+        self.action_remove_interior = QAction('Remover Faces Interiores/Intersectantes', self)
+        self.action_remove_interior.triggered.connect(self.remover_faces_interiores)
+        self.menu_malha.addAction(self.action_remove_interior)
+        self.action_remove_interior.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
@@ -356,6 +360,7 @@ class MeshRepairApp(QMainWindow):
         self.action_split_normals.setEnabled(True)
         self.action_mesh_cleanup.setEnabled(True)
         self.action_edge_split.setEnabled(True)
+        self.action_remove_interior.setEnabled(True)
         self.centralizar_camera(self.gl_reparada, mesh_reparada)
 
     def salvar_malha(self):
@@ -1027,6 +1032,113 @@ class MeshRepairApp(QMainWindow):
             self.centralizar_camera(self.gl_reparada, cleaned)
         except Exception as e:
             QMessageBox.warning(self, 'Erro em Mesh Cleanup', f'Não foi possível limpar a malha.\n{e}')
+
+    def remover_faces_interiores(self):
+        """Remove faces interiores e faces que se intersectam"""
+        if self.mesh_reparada is None:
+            return
+        
+        try:
+            mesh = self.mesh_reparada.copy()
+            
+            # Remove faces interiores (faces que não estão na superfície)
+            # Uma face é considerada interior se todas suas arestas são compartilhadas por outras faces
+            faces_to_remove = set()
+            
+            # Para cada face, verifica se é interior
+            for face_idx, face in enumerate(mesh.faces):
+                is_interior = True
+                
+                # Para cada aresta da face
+                for i in range(3):
+                    edge = tuple(sorted([face[i], face[(i+1)%3]]))
+                    edge_face_count = 0
+                    
+                    # Conta quantas faces compartilham esta aresta
+                    for other_face_idx, other_face in enumerate(mesh.faces):
+                        for j in range(3):
+                            other_edge = tuple(sorted([other_face[j], other_face[(j+1)%3]]))
+                            if edge == other_edge:
+                                edge_face_count += 1
+                    
+                    # Se uma aresta é compartilhada por menos de 2 faces, a face não é interior
+                    if edge_face_count < 2:
+                        is_interior = False
+                        break
+                
+                if is_interior:
+                    faces_to_remove.add(face_idx)
+            
+            # Remove faces intersectantes (faces que se cruzam)
+            # Detecta interseções usando bounding boxes das faces
+            for i in range(len(mesh.faces)):
+                if i in faces_to_remove:
+                    continue
+                    
+                face1 = mesh.faces[i]
+                vertices1 = mesh.vertices[face1]
+                
+                for j in range(i + 1, len(mesh.faces)):
+                    if j in faces_to_remove:
+                        continue
+                        
+                    face2 = mesh.faces[j]
+                    vertices2 = mesh.vertices[face2]
+                    
+                    # Verifica se as faces compartilham vértices
+                    shared_vertices = set(face1) & set(face2)
+                    if len(shared_vertices) >= 2:
+                        # Faces compartilham arestas, verifica se há interseção
+                        # Calcula bounding box das faces
+                        bbox1_min = np.min(vertices1, axis=0)
+                        bbox1_max = np.max(vertices1, axis=0)
+                        bbox2_min = np.min(vertices2, axis=0)
+                        bbox2_max = np.max(vertices2, axis=0)
+                        
+                        # Se os bounding boxes se intersectam, pode haver interseção
+                        if (bbox1_min < bbox2_max).all() and (bbox2_min < bbox1_max).all():
+                            # Verifica se há sobreposição significativa
+                            overlap_volume = np.prod(np.minimum(bbox1_max, bbox2_max) - np.maximum(bbox1_min, bbox2_min))
+                            bbox1_volume = np.prod(bbox1_max - bbox1_min)
+                            bbox2_volume = np.prod(bbox2_max - bbox2_min)
+                            
+                            # Se há sobreposição significativa, remove uma das faces
+                            if overlap_volume > 0.1 * min(bbox1_volume, bbox2_volume):
+                                faces_to_remove.add(j)
+            
+            if not faces_to_remove:
+                print("Nenhuma face interior ou intersectante encontrada")
+                return
+            
+            print(f"Removendo {len(faces_to_remove)} faces interiores/intersectantes")
+            
+            # Remove as faces marcadas
+            remaining_faces = [face for i, face in enumerate(mesh.faces) if i not in faces_to_remove]
+            
+            if not remaining_faces:
+                QMessageBox.warning(self, 'Remoção de Faces', 'Todas as faces foram removidas. Operação cancelada.')
+                return
+            
+            # Cria nova malha sem as faces removidas
+            new_mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=remaining_faces, process=True)
+            
+            # Atualiza a malha reparada
+            self.mesh_reparada = new_mesh
+            
+            # Atualiza visualização
+            self.gl_reparada.clear()
+            item = create_glmeshitem(new_mesh, color=(0.1, 0.8, 0.1, 1))
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(new_mesh, self.label_analise_reparada)
+            self.centralizar_camera(self.gl_reparada, new_mesh)
+            
+            print(f"Faces interiores/intersectantes removidas com sucesso. "
+                  f"Faces restantes: {len(new_mesh.faces)}")
+            
+        except Exception as e:
+            print(f"Erro ao remover faces interiores/intersectantes: {e}")
+            import traceback
+            traceback.print_exc()
 
     def edge_split_dialog(self):
         """Diálogo para configurar o Edge Split Modifier"""
