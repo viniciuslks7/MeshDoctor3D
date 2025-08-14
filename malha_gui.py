@@ -196,6 +196,10 @@ class MeshRepairApp(QMainWindow):
         self.action_remove_interior.triggered.connect(self.remover_faces_interiores)
         self.menu_malha.addAction(self.action_remove_interior)
         self.action_remove_interior.setEnabled(False)
+        self.action_weld_vertices = QAction('Soldar Vértices / Colapsar Arestas', self)
+        self.action_weld_vertices.triggered.connect(self.weld_vertices_dialog)
+        self.menu_malha.addAction(self.action_weld_vertices)
+        self.action_weld_vertices.setEnabled(False)
         # Menu Visualização
         self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
         self.action_reset_original = QAction('Resetar Visualização Original', self)
