@@ -1,12 +1,14 @@
 import sys
 import trimesh
 import pymeshfix
+import pymeshlab
 import numpy as np
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QSizePolicy, QDoubleSpinBox, QMainWindow, QAction, QMenuBar, QInputDialog, QMessageBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QSizePolicy, QDoubleSpinBox, QMainWindow, QAction, QMenuBar, QInputDialog, QMessageBox, QFrame, QSplitter, QGroupBox
 )
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QPalette, QColor, QIcon
 from pyqtgraph.opengl import GLViewWidget, MeshData, GLMeshItem, GLLinePlotItem
-from PyQt5.QtCore import Qt
 from scipy.spatial import cKDTree
 
 
@@ -36,236 +38,660 @@ def centralizar_na_origem(mesh):
 class MeshRepairApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Reparo de Malha 3D - STL/OBJ')
-        self.resize(1200, 600)
+        self.setWindowTitle('🔧 Reparo de Malha 3D - STL/OBJ')
+        self.resize(1400, 800)
+        self.setStyleSheet(self.get_modern_stylesheet())
+        
+        # Configuração da paleta de cores
+        self.setup_color_palette()
+        
         self.mesh_original = None
         self.mesh_reparada = None
+        
         # Widgets centrais
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        
+        # Configuração dos widgets 3D com melhor aparência
+        self.setup_3d_widgets()
+        
+        # Labels com melhor estilo
+        self.setup_labels()
+        
+        # Botões principais com design moderno
+        self.setup_main_buttons()
+        
+        # Layout principal com melhor organização
+        self.setup_main_layout(central_widget)
+        
+        # Barra de menu com estilo melhorado
+        self.setup_menu_bar()
+        
+        # Configuração das ações
+        self.setup_actions()
+        
+        # Timer para atualizações visuais
+        self.setup_timers()
+        
+        # Aplicar estilos finais
+        self.apply_final_styles()
+
+    def get_modern_stylesheet(self):
+        """Retorna um stylesheet moderno para a interface"""
+        return """
+        QMainWindow {
+            background-color: #2b2b2b;
+            color: #ffffff;
+        }
+        
+        QWidget {
+            background-color: #2b2b2b;
+            color: #ffffff;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 10pt;
+        }
+        
+        QPushButton {
+            background-color: #4a90e2;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 11pt;
+            min-height: 20px;
+        }
+        
+        QPushButton:hover {
+            background-color: #357abd;
+            transform: translateY(-1px);
+        }
+        
+        QPushButton:pressed {
+            background-color: #2d5aa0;
+        }
+        
+        QPushButton:disabled {
+            background-color: #555555;
+            color: #888888;
+        }
+        
+        QLabel {
+            color: #ffffff;
+            font-weight: bold;
+            padding: 5px;
+            background-color: transparent;
+        }
+        
+        QLabel[class="title"] {
+            font-size: 14pt;
+            color: #4a90e2;
+            background-color: #1e1e1e;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 5px;
+        }
+        
+        QLabel[class="analysis"] {
+            background-color: #1e1e1e;
+            border: 1px solid #4a90e2;
+            border-radius: 5px;
+            padding: 8px;
+            margin: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 9pt;
+        }
+        
+        QMenuBar {
+            background-color: #1e1e1e;
+            color: #ffffff;
+            border-bottom: 2px solid #4a90e2;
+            font-weight: bold;
+        }
+        
+        QMenuBar::item {
+            background-color: transparent;
+            padding: 8px 12px;
+            margin: 2px;
+        }
+        
+        QMenuBar::item:selected {
+            background-color: #4a90e2;
+            border-radius: 3px;
+        }
+        
+        QMenu {
+            background-color: #1e1e1e;
+            border: 1px solid #4a90e2;
+            border-radius: 5px;
+            padding: 5px;
+        }
+        
+        QMenu::item {
+            padding: 8px 20px;
+            border-radius: 3px;
+        }
+        
+        QMenu::item:selected {
+            background-color: #4a90e2;
+        }
+        
+        QGroupBox {
+            font-weight: bold;
+            border: 2px solid #4a90e2;
+            border-radius: 8px;
+            margin-top: 10px;
+            padding-top: 10px;
+            background-color: #1e1e1e;
+        }
+        
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px 0 5px;
+            color: #4a90e2;
+        }
+        
+        QFrame[class="separator"] {
+            background-color: #4a90e2;
+            border: none;
+            min-height: 2px;
+            max-height: 2px;
+        }
+        
+        QFrame[class="panel"] {
+            background-color: #1e1e1e;
+            border: 1px solid #4a90e2;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        """
+
+    def setup_color_palette(self):
+        """Configura a paleta de cores da aplicação"""
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QColor(43, 43, 43))
+        palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
+        palette.setColor(QPalette.Base, QColor(30, 30, 30))
+        palette.setColor(QPalette.AlternateBase, QColor(74, 144, 226))
+        palette.setColor(QPalette.ToolTipBase, QColor(30, 30, 30))
+        palette.setColor(QPalette.ToolTipText, QColor(255, 255, 255))
+        palette.setColor(QPalette.Text, QColor(255, 255, 255))
+        palette.setColor(QPalette.Button, QColor(74, 144, 226))
+        palette.setColor(QPalette.ButtonText, QColor(255, 255, 255))
+        palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
+        palette.setColor(QPalette.Link, QColor(74, 144, 226))
+        palette.setColor(QPalette.Highlight, QColor(74, 144, 226))
+        palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+        self.setPalette(palette)
+
+    def setup_3d_widgets(self):
+        """Configura os widgets 3D com melhor aparência"""
         self.gl_original = GLViewWidget()
         self.gl_reparada = GLViewWidget()
-        self.gl_original.setCameraPosition(distance=200)
-        self.gl_reparada.setCameraPosition(distance=200)
-        self.gl_original.setBackgroundColor('w')
-        self.gl_reparada.setBackgroundColor('w')
-        self.gl_original.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.gl_reparada.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.label_original = QLabel('Original')
-        self.label_original.setAlignment(Qt.AlignHCenter)
-        self.label_reparada = QLabel('Reparada')
-        self.label_reparada.setAlignment(Qt.AlignHCenter)
+        
+        # Configurações dos widgets 3D
+        for gl_widget in [self.gl_original, self.gl_reparada]:
+            gl_widget.setCameraPosition(distance=200)
+            gl_widget.setBackgroundColor('w')
+            gl_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            gl_widget.setMinimumSize(400, 300)
+            
+            # Adiciona borda e estilo aos widgets 3D
+            gl_widget.setStyleSheet("""
+                QWidget {
+                    border: 2px solid #4a90e2;
+                    border-radius: 8px;
+                    background-color: #ffffff;
+                }
+            """)
+
+    def setup_labels(self):
+        """Configura os labels com melhor estilo"""
+        self.label_original = QLabel('🔄 Original')
+        self.label_reparada = QLabel('✅ Reparada')
         self.label_analise = QLabel('')
-        self.label_analise.setAlignment(Qt.AlignHCenter)
         self.label_analise_reparada = QLabel('')
-        self.label_analise_reparada.setAlignment(Qt.AlignHCenter)
-        # Botões principais
-        self.btn_abrir = QPushButton('Abrir STL/OBJ')
-        self.btn_reparar = QPushButton('Reparar Malha')
-        self.btn_salvar = QPushButton('Salvar Malha Reparada')
+        
+        # Aplicar estilos aos labels
+        for label in [self.label_original, self.label_reparada]:
+            label.setAlignment(Qt.AlignHCenter)
+            label.setProperty("class", "title")
+            label.setStyleSheet(label.styleSheet())
+        
+        for label in [self.label_analise, self.label_analise_reparada]:
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            label.setProperty("class", "analysis")
+            label.setStyleSheet(label.styleSheet())
+            label.setWordWrap(True)
+            label.setMinimumHeight(80)
+
+    def setup_main_buttons(self):
+        """Configura os botões principais com design moderno"""
+        self.btn_abrir = QPushButton('📁 Abrir STL/OBJ')
+        self.btn_reparar = QPushButton('🔧 Reparar Malha')
+        self.btn_salvar = QPushButton('💾 Salvar Malha Reparada')
+        
+        # Adicionar tooltips informativos
+        self.btn_abrir.setToolTip('Carregar arquivo STL ou OBJ para reparo')
+        self.btn_reparar.setToolTip('Executar reparo automático da malha 3D')
+        self.btn_salvar.setToolTip('Salvar malha reparada em formato STL ou OBJ')
+        
+        # Conectar sinais
         self.btn_abrir.clicked.connect(self.abrir_arquivo)
         self.btn_reparar.clicked.connect(self.reparar_malha)
         self.btn_salvar.clicked.connect(self.salvar_malha)
+        
+        # Configurar estados iniciais
         self.btn_abrir.setEnabled(True)
         self.btn_reparar.setEnabled(False)
         self.btn_salvar.setEnabled(False)
+        
+        # Adicionar botões de reset com melhor estilo
+        self.btn_reset_original = QPushButton('🔄 Reset Original')
+        self.btn_reset_reparada = QPushButton('🔄 Reset Reparada')
+        self.btn_reset_original.clicked.connect(lambda: self.centralizar_camera(self.gl_original, self.mesh_original))
+        self.btn_reset_reparada.clicked.connect(lambda: self.centralizar_camera(self.gl_reparada, self.mesh_reparada))
+        self.btn_reset_original.setEnabled(False)
+        self.btn_reset_reparada.setEnabled(False)
+        
+        # Tooltips para botões de reset
+        self.btn_reset_original.setToolTip('Centralizar visualização da malha original')
+        self.btn_reset_reparada.setToolTip('Centralizar visualização da malha reparada')
+
+    def setup_main_layout(self, central_widget):
+        """Configura o layout principal com melhor organização"""
         # Layout principal
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Painel superior com botões principais
+        top_panel = QFrame()
+        top_panel.setProperty("class", "panel")
+        top_layout = QVBoxLayout()
+        top_layout.setSpacing(15)
+        top_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Título principal
+        title_label = QLabel('🔧 FERRAMENTA PROFISSIONAL DE REPARO DE MALHA 3D')
+        title_label.setAlignment(Qt.AlignHCenter)
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18pt;
+                font-weight: bold;
+                color: #4a90e2;
+                background-color: #1e1e1e;
+                border: 2px solid #4a90e2;
+                border-radius: 10px;
+                padding: 15px;
+                margin: 10px;
+            }
+        """)
+        top_layout.addWidget(title_label)
+        
+        # Subtítulo informativo
+        subtitle_label = QLabel('Reparo automático e profissional de malhas 3D para impressão e modelagem')
+        subtitle_label.setAlignment(Qt.AlignHCenter)
+        subtitle_label.setStyleSheet("""
+            QLabel {
+                font-size: 11pt;
+                color: #cccccc;
+                background-color: transparent;
+                padding: 5px;
+            }
+        """)
+        top_layout.addWidget(subtitle_label)
+        
+        # Botões principais em linha com melhor espaçamento
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(20)
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_abrir)
         btn_layout.addWidget(self.btn_reparar)
         btn_layout.addWidget(self.btn_salvar)
-        layout.addLayout(btn_layout)
+        btn_layout.addStretch()
+        top_layout.addLayout(btn_layout)
+        
+        top_panel.setLayout(top_layout)
+        main_layout.addWidget(top_panel)
+        
+        # Separador visual
+        separator = QFrame()
+        separator.setProperty("class", "separator")
+        separator.setMaximumHeight(3)
+        main_layout.addWidget(separator)
+        
+        # Layout de visualização com melhor organização
         vis_layout = QHBoxLayout()
-        vis_left = QVBoxLayout()
-        vis_left.addWidget(self.gl_original)
-        vis_left.addWidget(self.label_original)
-        vis_left.addWidget(self.label_analise)
-        vis_right = QVBoxLayout()
-        vis_right.addWidget(self.gl_reparada)
-        vis_right.addWidget(self.label_reparada)
-        vis_right.addWidget(self.label_analise_reparada)
-        vis_layout.addLayout(vis_left)
-        vis_layout.addLayout(vis_right)
-        layout.addLayout(vis_layout)
-        central_widget.setLayout(layout)
-        # Barra de menu
+        vis_layout.setSpacing(20)
+        
+        # Painel esquerdo (Original)
+        left_panel = QFrame()
+        left_panel.setProperty("class", "panel")
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(15, 15, 15, 15)
+        
+        left_layout.addWidget(self.gl_original)
+        left_layout.addWidget(self.label_original)
+        left_layout.addWidget(self.label_analise)
+        
+        # Botões de controle para visualização original
+        left_controls = QHBoxLayout()
+        left_controls.setSpacing(10)
+        left_controls.addWidget(self.btn_reset_original)
+        left_controls.addStretch()
+        left_layout.addLayout(left_controls)
+        
+        left_panel.setLayout(left_layout)
+        
+        # Painel direito (Reparada)
+        right_panel = QFrame()
+        right_panel.setProperty("class", "panel")
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(10)
+        right_layout.setContentsMargins(15, 15, 15, 15)
+        
+        right_layout.addWidget(self.gl_reparada)
+        right_layout.addWidget(self.label_reparada)
+        right_layout.addWidget(self.label_analise_reparada)
+        
+        # Botões de controle para visualização reparada
+        right_controls = QHBoxLayout()
+        right_controls.setSpacing(10)
+        right_controls.addWidget(self.btn_reset_reparada)
+        right_controls.addStretch()
+        right_layout.addLayout(right_controls)
+        
+        right_panel.setLayout(right_layout)
+        
+        # Adicionar painéis ao layout de visualização
+        vis_layout.addWidget(left_panel)
+        vis_layout.addWidget(right_panel)
+        
+        main_layout.addLayout(vis_layout)
+        
+        # Barra de status
+        self.status_bar = QLabel('✅ Pronto para carregar arquivos STL/OBJ')
+        self.status_bar.setAlignment(Qt.AlignHCenter)
+        self.status_bar.setStyleSheet("""
+            QLabel {
+                background-color: #1e1e1e;
+                border: 1px solid #4a90e2;
+                border-radius: 5px;
+                padding: 8px;
+                margin: 5px;
+                color: #4a90e2;
+                font-weight: bold;
+            }
+        """)
+        main_layout.addWidget(self.status_bar)
+        
+        # Configurar o layout principal
+        central_widget.setLayout(main_layout)
+
+    def setup_menu_bar(self):
+        """Configura a barra de menu com estilo melhorado"""
         self.menu_bar = QMenuBar(self)
         self.setMenuBar(self.menu_bar)
+        
+        # Aplicar estilo personalizado ao menu
+        self.menu_bar.setStyleSheet(self.menu_bar.styleSheet())
+
+    def setup_actions(self):
+        """Configura as ações do menu (será implementado depois)"""
         # Menu Topologia/Geometria
-        self.menu_topologia = self.menu_bar.addMenu('Topologia/Geometria')
-        self.action_remove_doubles = QAction('Remover Duplicados', self)
+        self.menu_topologia = self.menu_bar.addMenu('🔧 Topologia/Geometria')
+        
+        self.action_remove_doubles = QAction('🔄 Remover Duplicados', self)
         self.action_remove_doubles.triggered.connect(self.remover_duplicados_dialog)
         self.menu_topologia.addAction(self.action_remove_doubles)
-        self.action_suavizar = QAction('Suavizar Malha Reparada', self)
+        
+        self.action_suavizar = QAction('✨ Suavizar Malha Reparada', self)
         self.action_suavizar.triggered.connect(self.suavizar_malha)
         self.menu_topologia.addAction(self.action_suavizar)
-        self.action_normals_out = QAction('Recalcular Normais para Fora', self)
+        
+        self.action_normals_out = QAction('⬆️ Recalcular Normais para Fora', self)
         self.action_normals_out.triggered.connect(lambda: self.recalcular_normais('out'))
         self.menu_topologia.addAction(self.action_normals_out)
-        self.action_normals_in = QAction('Recalcular Normais para Dentro', self)
+        
+        self.action_normals_in = QAction('⬇️ Recalcular Normais para Dentro', self)
         self.action_normals_in.triggered.connect(lambda: self.recalcular_normais('in'))
         self.menu_topologia.addAction(self.action_normals_in)
-        self.action_fill_holes = QAction('Preencher Buracos / Tornar Manifold', self)
+        
+        self.action_fill_holes = QAction('🕳️ Preencher Buracos / Tornar Manifold', self)
         self.action_fill_holes.triggered.connect(self.preencher_buracos)
         self.menu_topologia.addAction(self.action_fill_holes)
-        self.action_fill_holes.setEnabled(False)
-        self.action_remove_nonmanifold = QAction('Remover Geometria Não-Manifold', self)
+        
+        self.action_remove_nonmanifold = QAction('❌ Remover Geometria Não-Manifold', self)
         self.action_remove_nonmanifold.triggered.connect(self.remover_nao_manifold)
         self.menu_topologia.addAction(self.action_remove_nonmanifold)
-        self.action_remove_nonmanifold.setEnabled(False)
-        self.action_decimate = QAction('Simplificar Malha (Decimate)', self)
+        
+        self.action_decimate = QAction('📉 Simplificar Malha (Decimate)', self)
         self.action_decimate.triggered.connect(self.simplificar_malha_dialog)
         self.menu_topologia.addAction(self.action_decimate)
-        self.action_decimate.setEnabled(False)
-        self.action_triangulate = QAction('Triangular Faces (Triangulate)', self)
+        
+        self.action_triangulate = QAction('🔺 Triangular Faces (Triangulate)', self)
         self.action_triangulate.triggered.connect(self.triangulate_faces)
         self.menu_topologia.addAction(self.action_triangulate)
-        self.action_triangulate.setEnabled(False)
-        self.action_quadrangulate = QAction('Quadrangular Faces (Quadrangulate)', self)
+        
+        self.action_quadrangulate = QAction('⬜ Quadrangular Faces (Quadrangulate)', self)
         self.action_quadrangulate.triggered.connect(self.quadrangulate_faces)
         self.menu_topologia.addAction(self.action_quadrangulate)
-        self.action_quadrangulate.setEnabled(False)
-        self.action_remove_degenerate = QAction('Remover Faces Degeneradas/Área Zero', self)
+        
+        self.action_remove_degenerate = QAction('🗑️ Remover Faces Degeneradas/Área Zero', self)
         self.action_remove_degenerate.triggered.connect(self.remover_faces_degeneradas)
         self.menu_topologia.addAction(self.action_remove_degenerate)
-        self.action_remove_degenerate.setEnabled(False)
-        self.action_remesh = QAction('Remesh (Voxel)', self)
+        
+        self.action_remesh = QAction('🔲 Remesh (Voxel)', self)
         self.action_remesh.triggered.connect(self.remesh_voxel_dialog)
         self.menu_topologia.addAction(self.action_remesh)
-        self.action_remesh.setEnabled(False)
-        # Remover Quadriflow do menu e do código
-        # self.action_remesh_quadriflow = QAction('Remesh (Quadriflow)', self)
-        # self.action_remesh_quadriflow.triggered.connect(self.remesh_quadriflow_dialog)
-        # self.menu_topologia.addAction(self.action_remesh_quadriflow)
-        # self.action_remesh_quadriflow.setEnabled(False)
-        self.action_remesh_surface = QAction('Remesh (Surface)', self)
+        
+        self.action_remesh_surface = QAction('🌊 Remesh (Surface)', self)
         self.action_remesh_surface.triggered.connect(self.remesh_surface_dialog)
         self.menu_topologia.addAction(self.action_remesh_surface)
-        self.action_remesh_surface.setEnabled(False)
-        self.action_listar_metodos = QAction('Listar Métodos PyMeshLab', self)
-        self.action_listar_metodos.triggered.connect(self.listar_metodos_pymeshlab)
-        self.menu_topologia.addAction(self.action_listar_metodos)
-        self.action_exportar_metodos = QAction('Exportar Métodos PyMeshLab', self)
-        self.action_exportar_metodos.triggered.connect(self.exportar_metodos_pymeshlab)
-        self.menu_topologia.addAction(self.action_exportar_metodos)
-        self.action_exportar_atributos = QAction('Exportar Atributos PyMeshLab', self)
-        self.action_exportar_atributos.triggered.connect(self.exportar_atributos_pymeshlab)
-        self.menu_topologia.addAction(self.action_exportar_atributos)
-        self.action_auto_retopo = QAction('Auto Retopology', self)
+        
+        self.action_auto_retopo = QAction('🔄 Auto Retopology', self)
         self.action_auto_retopo.triggered.connect(self.auto_retopology_dialog)
         self.menu_topologia.addAction(self.action_auto_retopo)
-        self.action_auto_retopo.setEnabled(False)
-        # Novo menu Sombreamento
-        self.menu_sombreamento = self.menu_bar.addMenu('Sombreamento')
-        self.action_shade_smooth = QAction('Shade Smooth', self)
+        
+        # Menu Sombreamento
+        self.menu_sombreamento = self.menu_bar.addMenu('🎨 Sombreamento')
+        
+        self.action_shade_smooth = QAction('✨ Shade Smooth', self)
         self.action_shade_smooth.triggered.connect(self.shade_smooth)
         self.menu_sombreamento.addAction(self.action_shade_smooth)
-        self.action_shade_smooth.setEnabled(False)
-        self.action_shade_flat = QAction('Shade Flat', self)
+        
+        self.action_shade_flat = QAction('📐 Shade Flat', self)
         self.action_shade_flat.triggered.connect(self.shade_flat)
         self.menu_sombreamento.addAction(self.action_shade_flat)
-        self.action_shade_flat.setEnabled(False)
-        self.action_auto_smooth = QAction('Auto Smooth', self)
+        
+        self.action_auto_smooth = QAction('🤖 Auto Smooth', self)
         self.action_auto_smooth.triggered.connect(self.auto_smooth_dialog)
         self.menu_sombreamento.addAction(self.action_auto_smooth)
-        self.action_auto_smooth.setEnabled(False)
-        self.action_transfer_normals = QAction('Transferir Normais da Original', self)
+        
+        self.action_transfer_normals = QAction('📤 Transferir Normais da Original', self)
         self.action_transfer_normals.triggered.connect(self.transferir_normais)
         self.menu_sombreamento.addAction(self.action_transfer_normals)
-        self.action_transfer_normals.setEnabled(False)
-        self.action_weighted_normals = QAction('Weighted Normals', self)
+        
+        self.action_weighted_normals = QAction('⚖️ Weighted Normals', self)
         self.action_weighted_normals.triggered.connect(self.weighted_normals)
         self.menu_sombreamento.addAction(self.action_weighted_normals)
-        self.action_weighted_normals.setEnabled(False)
-        self.action_split_normals = QAction('Split Normals (Hard Edges)', self)
+        
+        self.action_split_normals = QAction('✂️ Split Normals (Hard Edges)', self)
         self.action_split_normals.triggered.connect(self.split_normals_dialog)
         self.menu_sombreamento.addAction(self.action_split_normals)
-        self.action_split_normals.setEnabled(False)
-        # Novo menu Malha e Estrutura
-        self.menu_malha = self.menu_bar.addMenu('Malha e Estrutura')
-        self.action_mesh_cleanup = QAction('Mesh Cleanup / Delete Loose Geometry', self)
+        
+        # Menu Malha e Estrutura
+        self.menu_malha = self.menu_bar.addMenu('🏗️ Malha e Estrutura')
+        
+        self.action_mesh_cleanup = QAction('🧹 Mesh Cleanup / Delete Loose Geometry', self)
         self.action_mesh_cleanup.triggered.connect(self.mesh_cleanup)
         self.menu_malha.addAction(self.action_mesh_cleanup)
-        self.action_mesh_cleanup.setEnabled(False)
-        self.action_edge_split = QAction('Edge Split Modifier', self)
+        
+        self.action_edge_split = QAction('✂️ Edge Split Modifier', self)
         self.action_edge_split.triggered.connect(self.edge_split_dialog)
         self.menu_malha.addAction(self.action_edge_split)
-        self.action_edge_split.setEnabled(False)
-        self.action_remove_interior = QAction('Remover Faces Interiores/Intersectantes', self)
+        
+        self.action_remove_interior = QAction('🚫 Remover Faces Interiores/Intersectantes', self)
         self.action_remove_interior.triggered.connect(self.remover_faces_interiores)
         self.menu_malha.addAction(self.action_remove_interior)
-        self.action_remove_interior.setEnabled(False)
-        self.action_weld_vertices = QAction('Soldar Vértices / Colapsar Arestas', self)
+        
+        self.action_weld_vertices = QAction('🔗 Soldar Vértices / Colapsar Arestas', self)
         self.action_weld_vertices.triggered.connect(self.weld_vertices_dialog)
         self.menu_malha.addAction(self.action_weld_vertices)
-        self.action_weld_vertices.setEnabled(False)
-        self.action_subdivision = QAction('Subdivision Surface / Catmull-Clark', self)
+        
+        self.action_subdivision = QAction('🔲 Subdivision Surface / Catmull-Clark', self)
         self.action_subdivision.triggered.connect(self.subdivision_surface_dialog)
         self.menu_malha.addAction(self.action_subdivision)
         
-        action_solidify = QAction("Solidify Modifier (Casca Espessa)", self)
-        action_solidify.triggered.connect(self.solidify_modifier_dialog)
-        self.menu_malha.addAction(action_solidify)
-        # Menu Visualização
-        self.menu_visualizacao = self.menu_bar.addMenu('Visualização')
-        self.action_reset_original = QAction('Resetar Visualização Original', self)
-        self.action_reset_original.triggered.connect(lambda: self.centralizar_camera(self.gl_original, self.mesh_original))
-        self.menu_visualizacao.addAction(self.action_reset_original)
-        self.action_reset_reparada = QAction('Resetar Visualização Reparada', self)
-        self.action_reset_reparada.triggered.connect(lambda: self.centralizar_camera(self.gl_reparada, self.mesh_reparada))
-        self.menu_visualizacao.addAction(self.action_reset_reparada)
-        # Habilitar/desabilitar ações conforme contexto
-        self.action_remove_doubles.setEnabled(False)
-        self.action_suavizar.setEnabled(False)
-        self.action_reset_original.setEnabled(True)
-        self.action_reset_reparada.setEnabled(False)
-        self.action_normals_out.setEnabled(False)
-        self.action_normals_in.setEnabled(False)
-        self.action_fill_holes.setEnabled(False)
-        self.action_remove_nonmanifold.setEnabled(False)
-        self.action_decimate.setEnabled(False)
-        self.action_triangulate.setEnabled(False)
-        self.action_quadrangulate.setEnabled(False)
-        self.action_remove_degenerate.setEnabled(False)
-        self.action_remesh.setEnabled(False)
-        # self.action_remesh_quadriflow.setEnabled(False) # Removido
-        self.action_remesh_surface.setEnabled(False)
-        self.action_auto_retopo.setEnabled(False)
-        self.action_shade_smooth.setEnabled(False)
-        self.action_shade_flat.setEnabled(False)
-        self.action_auto_smooth.setEnabled(False)
-        self.action_transfer_normals.setEnabled(False)
-        self.action_weighted_normals.setEnabled(False)
-        self.action_split_normals.setEnabled(False)
-        self.action_mesh_cleanup.setEnabled(False)
-        self.action_edge_split.setEnabled(False)
-        self.action_remove_interior.setEnabled(False)
-        self.action_weld_vertices.setEnabled(False)
-        self.action_subdivision.setEnabled(False)
-        self.action_solidify.setEnabled(False)
-        self.action_mesh_stats.setEnabled(False)
-        
-        # Menu Malha e Estrutura
-        menu_malha_estrutura = self.menu_malha.addMenu('Malha e Estrutura')
+        self.action_solidify = QAction('🧱 Solidify Modifier (Casca Espessa)', self)
+        self.action_solidify.triggered.connect(self.solidify_modifier_dialog)
+        self.menu_malha.addAction(self.action_solidify)
         
         # Menu Verificações e Diagnóstico
-        menu_verificacoes = self.menu_bar.addMenu('Verificações e Diagnóstico')
+        self.menu_verificacoes = self.menu_bar.addMenu('🔍 Verificações e Diagnóstico')
         
-        action_mesh_stats = QAction("Estatísticas da Malha (N-gons, Tris, Pólos)", self)
-        action_mesh_stats.triggered.connect(self.estatisticas_malha_dialog)
-        menu_verificacoes.addAction(action_mesh_stats)
+        self.action_mesh_stats = QAction('📊 Estatísticas da Malha (N-gons, Tris, Pólos)', self)
+        self.action_mesh_stats.triggered.connect(self.estatisticas_malha_dialog)
+        self.menu_verificacoes.addAction(self.action_mesh_stats)
+        
+        # Menu Visualização
+        self.menu_visualizacao = self.menu_bar.addMenu('👁️ Visualização')
+        
+        self.action_reset_original = QAction('🔄 Resetar Visualização Original', self)
+        self.action_reset_original.triggered.connect(lambda: self.centralizar_camera(self.gl_original, self.mesh_original))
+        self.menu_visualizacao.addAction(self.action_reset_original)
+        
+        self.action_reset_reparada = QAction('🔄 Resetar Visualização Reparada', self)
+        self.action_reset_reparada.triggered.connect(lambda: self.centralizar_camera(self.gl_reparada, self.mesh_reparada))
+        self.menu_visualizacao.addAction(self.action_reset_reparada)
+        
+        # Menu Ferramentas (para métodos PyMeshLab)
+        self.menu_ferramentas = self.menu_bar.addMenu('🛠️ Ferramentas')
+        
+        self.action_listar_metodos = QAction('📋 Listar Métodos PyMeshLab', self)
+        self.action_listar_metodos.triggered.connect(self.listar_metodos_pymeshlab)
+        self.menu_ferramentas.addAction(self.action_listar_metodos)
+        
+        self.action_exportar_metodos = QAction('💾 Exportar Métodos PyMeshLab', self)
+        self.action_exportar_metodos.triggered.connect(self.exportar_metodos_pymeshlab)
+        self.menu_ferramentas.addAction(self.action_exportar_metodos)
+        
+        self.action_exportar_atributos = QAction('📄 Exportar Atributos PyMeshLab', self)
+        self.action_exportar_atributos.triggered.connect(self.exportar_atributos_pymeshlab)
+        self.menu_ferramentas.addAction(self.action_exportar_atributos)
+        
+        # Habilitar/desabilitar ações conforme contexto
+        self.disable_all_actions()
+        
+        # Ações que sempre estão habilitadas
+        self.action_reset_original.setEnabled(True)
+        self.action_listar_metodos.setEnabled(True)
+        self.action_exportar_metodos.setEnabled(True)
+        self.action_exportar_atributos.setEnabled(True)
+
+    def disable_all_actions(self):
+        """Desabilita todas as ações que dependem de malha carregada"""
+        actions_to_disable = [
+            self.action_remove_doubles, self.action_suavizar, self.action_normals_out,
+            self.action_normals_in, self.action_fill_holes, self.action_remove_nonmanifold,
+            self.action_decimate, self.action_triangulate, self.action_quadrangulate,
+            self.action_remove_degenerate, self.action_remesh, self.action_remesh_surface,
+            self.action_auto_retopo, self.action_shade_smooth, self.action_shade_flat,
+            self.action_auto_smooth, self.action_transfer_normals, self.action_weighted_normals,
+            self.action_split_normals, self.action_mesh_cleanup, self.action_edge_split,
+            self.action_remove_interior, self.action_weld_vertices, self.action_subdivision,
+            self.action_solidify, self.action_mesh_stats, self.action_reset_reparada
+        ]
+        
+        for action in actions_to_disable:
+            if action:
+                action.setEnabled(False)
+
+    def enable_all_actions(self):
+        """Habilita todas as ações quando malha é reparada"""
+        actions_to_enable = [
+            self.action_remove_doubles, self.action_suavizar, self.action_normals_out,
+            self.action_normals_in, self.action_fill_holes, self.action_remove_nonmanifold,
+            self.action_decimate, self.action_triangulate, self.action_quadrangulate,
+            self.action_remove_degenerate, self.action_remesh, self.action_remesh_surface,
+            self.action_auto_retopo, self.action_shade_smooth, self.action_shade_flat,
+            self.action_auto_smooth, self.action_transfer_normals, self.action_weighted_normals,
+            self.action_split_normals, self.action_mesh_cleanup, self.action_edge_split,
+            self.action_remove_interior, self.action_weld_vertices, self.action_subdivision,
+            self.action_solidify, self.action_mesh_stats, self.action_reset_reparada
+        ]
+        
+        for action in actions_to_enable:
+            if action:
+                action.setEnabled(True)
+
+    def setup_timers(self):
+        """Configura timers para atualizações visuais"""
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_visual_elements)
+        self.update_timer.start(100)  # Atualiza a cada 100ms
+
+    def apply_final_styles(self):
+        """Aplica estilos finais e configurações visuais"""
+        # Forçar atualização dos estilos
+        self.setStyleSheet(self.styleSheet())
+        
+        # Configurar fonte padrão
+        font = QFont("Segoe UI", 10)
+        self.setFont(font)
+
+    def update_visual_elements(self):
+        """Atualiza elementos visuais periodicamente"""
+        # Atualizar estados dos botões baseado na disponibilidade das malhas
+        if hasattr(self, 'btn_reset_original'):
+            self.btn_reset_original.setEnabled(self.mesh_original is not None)
+        if hasattr(self, 'btn_reset_reparada'):
+            self.btn_reset_reparada.setEnabled(self.mesh_reparada is not None)
+
+    def update_status_bar(self, message, status_type="info"):
+        """Atualiza a barra de status com mensagem e tipo específico"""
+        if not hasattr(self, 'status_bar'):
+            return
+            
+        # Definir cores baseadas no tipo de status
+        colors = {
+            "info": "#4a90e2",      # Azul para informações
+            "success": "#4CAF50",   # Verde para sucesso
+            "warning": "#FF9800",   # Laranja para avisos
+            "error": "#F44336"      # Vermelho para erros
+        }
+        
+        color = colors.get(status_type, colors["info"])
+        
+        # Atualizar estilo e texto
+        self.status_bar.setText(message)
+        self.status_bar.setStyleSheet(f"""
+            QLabel {{
+                background-color: #1e1e1e;
+                border: 1px solid {color};
+                border-radius: 5px;
+                padding: 8px;
+                margin: 5px;
+                color: {color};
+                font-weight: bold;
+            }}
+        """)
 
     def abrir_arquivo(self):
         from PyQt5.QtWidgets import QMessageBox
         fname, _ = QFileDialog.getOpenFileName(self, 'Abrir arquivo STL/OBJ', '', 'Malhas 3D (*.stl *.obj)')
         if fname:
+            self.update_status_bar('🔄 Carregando arquivo...', 'info')
             mesh = trimesh.load(fname, process=False)
             # Tentar processar e corrigir problemas leves
             try:
                 mesh.process(validate=True)
             except Exception as e:
                 QMessageBox.warning(self, 'Aviso', f'Problemas ao processar a malha original.\n{e}')
+                self.update_status_bar('⚠️ Problemas detectados na malha original', 'warning')
             mesh = centralizar_na_origem(mesh)
             self.mesh_original = mesh
             self.gl_original.clear()
@@ -273,8 +699,10 @@ class MeshRepairApp(QMainWindow):
             try:
                 item = create_glmeshitem(self.mesh_original, color=(0.1, 0.3, 1, 1))  # azul mais forte
                 self.gl_original.addItem(item)
+                self.update_status_bar(f'✅ Arquivo carregado: {len(mesh.vertices)} vértices, {len(mesh.faces)} faces', 'success')
             except Exception as e:
                 QMessageBox.warning(self, 'Erro ao Renderizar', f'Não foi possível renderizar a malha original.\nA malha pode estar corrompida ou precisar de reparo.\n{e}')
+                self.update_status_bar('❌ Erro ao renderizar malha', 'error')
             self.highlight_holes(self.mesh_original)
             self.highlight_nonmanifold_faces(self.mesh_original)
             self.analisar_malha(self.mesh_original, self.label_analise)
@@ -282,33 +710,8 @@ class MeshRepairApp(QMainWindow):
             self.mesh_reparada = None
             self.btn_reparar.setEnabled(True)
             self.btn_salvar.setEnabled(False)
-            self.action_remove_doubles.setEnabled(False)
-            self.action_suavizar.setEnabled(False)
+            self.disable_all_actions()
             self.action_reset_original.setEnabled(True)
-            self.action_reset_reparada.setEnabled(False)
-            self.action_normals_out.setEnabled(False)
-            self.action_normals_in.setEnabled(False)
-            self.action_fill_holes.setEnabled(False)
-            self.action_remove_nonmanifold.setEnabled(False)
-            self.action_decimate.setEnabled(False)
-            self.action_triangulate.setEnabled(False)
-            self.action_quadrangulate.setEnabled(False)
-            self.action_remove_degenerate.setEnabled(False)
-            self.action_remesh.setEnabled(False)
-            self.action_remesh_surface.setEnabled(False)
-            self.action_auto_retopo.setEnabled(False)
-            self.action_shade_smooth.setEnabled(False)
-            self.action_shade_flat.setEnabled(False)
-            self.action_auto_smooth.setEnabled(False)
-            self.action_transfer_normals.setEnabled(False)
-            self.action_weighted_normals.setEnabled(False)
-            self.action_split_normals.setEnabled(False)
-            self.action_mesh_cleanup.setEnabled(False)
-            self.action_edge_split.setEnabled(False)
-            self.action_remove_interior.setEnabled(False)
-            self.action_weld_vertices.setEnabled(False)
-            self.action_subdivision.setEnabled(False)
-            self.action_solidify.setEnabled(False)
             self.centralizar_camera(self.gl_original, self.mesh_original)
             self.centralizar_camera(self.gl_reparada, self.mesh_original)
 
@@ -356,48 +759,36 @@ class MeshRepairApp(QMainWindow):
     def reparar_malha(self):
         if self.mesh_original is None:
             return
-        mesh = self.mesh_original
-        if mesh.is_watertight:
-            mesh_reparada = mesh.copy()
-        else:
-            meshfix = pymeshfix.MeshFix(mesh.vertices, mesh.faces)
-            meshfix.repair(verbose=True)
-            mesh_reparada = trimesh.Trimesh(vertices=meshfix.v, faces=meshfix.f)
-        mesh_reparada = centralizar_na_origem(mesh_reparada)
-        self.mesh_reparada = mesh_reparada
-        self.gl_reparada.clear()
-        item = create_glmeshitem(mesh_reparada, color=(0.1, 0.8, 0.1, 1))  # verde mais forte
-        self.gl_reparada.addItem(item)
-        self.analisar_malha(mesh_reparada, self.label_analise_reparada)
-        self.btn_salvar.setEnabled(True)
-        self.action_remove_doubles.setEnabled(True)
-        self.action_suavizar.setEnabled(True)
-        self.action_reset_reparada.setEnabled(True)
-        self.action_normals_out.setEnabled(True)
-        self.action_normals_in.setEnabled(True)
-        self.action_fill_holes.setEnabled(True)
-        self.action_remove_nonmanifold.setEnabled(True)
-        self.action_decimate.setEnabled(True)
-        self.action_triangulate.setEnabled(True)
-        self.action_quadrangulate.setEnabled(True)
-        self.action_remove_degenerate.setEnabled(True)
-        self.action_remesh.setEnabled(True)
-        self.action_remesh_surface.setEnabled(True)
-        self.action_auto_retopo.setEnabled(True)
-        self.action_shade_smooth.setEnabled(True)
-        self.action_shade_flat.setEnabled(True)
-        self.action_auto_smooth.setEnabled(True)
-        self.action_transfer_normals.setEnabled(True)
-        self.action_weighted_normals.setEnabled(True)
-        self.action_split_normals.setEnabled(True)
-        self.action_mesh_cleanup.setEnabled(True)
-        self.action_edge_split.setEnabled(True)
-        self.action_remove_interior.setEnabled(True)
-        self.action_weld_vertices.setEnabled(True)
-        self.action_subdivision.setEnabled(True)
-        self.action_solidify.setEnabled(True)
-        self.action_mesh_stats.setEnabled(True)
-        self.centralizar_camera(self.gl_reparada, mesh_reparada)
+        try:
+            self.update_status_bar('🔧 Reparando malha...', 'info')
+            mesh = self.mesh_original
+            if mesh.is_watertight:
+                mesh_reparada = mesh.copy()
+                self.update_status_bar('ℹ️ Malha já está fechada (watertight)', 'info')
+            else:
+                meshfix = pymeshfix.MeshFix(mesh.vertices, mesh.faces)
+                meshfix.repair(verbose=True)
+                mesh_reparada = trimesh.Trimesh(vertices=meshfix.v, faces=meshfix.f)
+                self.update_status_bar('🔧 Aplicando reparos automáticos...', 'info')
+            
+            mesh_reparada = centralizar_na_origem(mesh_reparada)
+            self.mesh_reparada = mesh_reparada
+            self.gl_reparada.clear()
+            item = create_glmeshitem(mesh_reparada, color=(0.1, 0.8, 0.1, 1))  # verde mais forte
+            self.gl_reparada.addItem(item)
+            self.analisar_malha(mesh_reparada, self.label_analise_reparada)
+            self.btn_salvar.setEnabled(True)
+            
+            # Habilitar todas as ações quando malha é reparada
+            self.enable_all_actions()
+            self.centralizar_camera(self.gl_reparada, mesh_reparada)
+            
+            self.update_status_bar(f'✅ Malha reparada com sucesso: {len(mesh_reparada.vertices)} vértices, {len(mesh_reparada.faces)} faces', 'success')
+            
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, 'Erro ao Reparar', f'Não foi possível reparar a malha.\n{e}')
+            self.update_status_bar('❌ Erro ao reparar malha', 'error')
 
     def salvar_malha(self):
         if self.mesh_reparada is None:
